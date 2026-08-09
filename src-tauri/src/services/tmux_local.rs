@@ -72,7 +72,31 @@ pub fn tmux_available() -> bool {
 /// and resume); `-D` = detach any other client (a stale one from before a
 /// crash/reload); `status off` / `mouse on` are chained as separate tmux commands
 /// after a literal `;` argv item (tmux splits its argv on a standalone `;`).
-pub fn local_tmux_args(session: &str, target_cmd: &str, target_args: &[String]) -> Vec<String> {
+///
+/// **`-c <cwd>` is not optional, and setting the child `tmux` process's cwd is
+/// not a substitute for it.** `tmux` here is a *client*: when a server is already
+/// running — which it is for anyone who uses tmux for anything else — the server
+/// creates the session with **its own** working directory and never looks at the
+/// client's. So a tab spawned with a perfectly good `cwd` landed wherever that
+/// long-lived server happened to be started, and the failure is worse than being
+/// in the wrong folder: if that directory has since been deleted, every process
+/// in the pane gets `getcwd: No such file or directory` and shell rc files start
+/// failing (`brew`, `node`, anything that resolves its own cwd at startup).
+///
+/// The bare-shell case is what makes it load-bearing rather than cosmetic. A
+/// command tab at least runs its own `<cmd>` — but `target_cmd` empty appends no
+/// command at all, so nothing downstream can `cd` back and the session's cwd is
+/// the only thing deciding where the user's shell opens.
+///
+/// It applies at **creation only**: `-A` attaching to an existing session cannot
+/// move it, so a session created before this fix keeps its bad directory until it
+/// is killed (the Sessions view's ×, or `tmux kill-session -t <name>`).
+pub fn local_tmux_args(
+    session: &str,
+    cwd: &str,
+    target_cmd: &str,
+    target_args: &[String],
+) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "new-session".into(),
         "-A".into(),
@@ -80,6 +104,12 @@ pub fn local_tmux_args(session: &str, target_cmd: &str, target_args: &[String]) 
         "-s".into(),
         session.to_string(),
     ];
+    // Empty only when the caller has no directory to name; tmux then falls back
+    // to the old behaviour rather than being handed an empty path to reject.
+    if !cwd.is_empty() {
+        args.push("-c".into());
+        args.push(cwd.to_string());
+    }
     if !target_cmd.is_empty() {
         // One positional arg = the command line tmux runs via `sh -c`. Keeping a
         // login shell after it is what makes a finished run reattachable.
@@ -129,10 +159,13 @@ pub fn local_tmux_ls_args() -> Vec<String> {
 /// a `tmux_session` name and tmux is available. No-op otherwise (no name, or no
 /// tmux — including all of Windows), leaving the tab to spawn exactly as before.
 ///
-/// Only the resolved local command is rewritten; `cwd`/`env` are left for
-/// `build_command` to apply to the `tmux` client, so a freshly-created session
-/// inherits them. Callers must ensure this runs only for a **local** spawn (not an
-/// `ssh`/`docker`-wrapped one) — see `commands::terminal::pty_spawn`.
+/// Only the resolved local command is rewritten. `env` is left for
+/// `build_command` to apply to the `tmux` client; **`cwd` is passed explicitly**
+/// as `-c`, because a session created by an already-running server takes the
+/// server's directory and not the client's (see [`local_tmux_args`]) — `opts.cwd`
+/// is still left in place so the client, and the non-tmux path, behave as before.
+/// Callers must ensure this runs only for a **local** spawn (not an `ssh`/`docker`
+/// -wrapped one) — see `commands::terminal::pty_spawn`.
 pub fn wrap_pty_options_local(opts: &mut PtyOptions) {
     if !tmux_available() {
         return;
@@ -140,7 +173,7 @@ pub fn wrap_pty_options_local(opts: &mut PtyOptions) {
     let Some(session) = opts.tmux_session.clone() else {
         return;
     };
-    let args = local_tmux_args(&session, &opts.cmd, &opts.args);
+    let args = local_tmux_args(&session, &opts.cwd, &opts.cmd, &opts.args);
     opts.cmd = "tmux".to_string();
     opts.args = args;
 }
@@ -153,11 +186,11 @@ mod tests {
     fn shell_tab_uses_default_login_shell_and_options() {
         // No target command → bare new-session (tmux's default login shell) so the
         // shell survives a typed command's completion; options chained after `;`.
-        let args = local_tmux_args("eldrun-abc", "", &[]);
+        let args = local_tmux_args("eldrun-abc", "/proj", "", &[]);
         assert_eq!(
             args,
             vec![
-                "new-session", "-A", "-D", "-s", "eldrun-abc",
+                "new-session", "-A", "-D", "-s", "eldrun-abc", "-c", "/proj",
                 ";", "set", "-g", "status", "off",
                 ";", "set", "-g", "mouse", "on",
             ]
@@ -165,13 +198,39 @@ mod tests {
     }
 
     #[test]
+    fn the_session_is_created_in_the_tabs_directory() {
+        // The whole point: `tmux` is a CLIENT, and a session created by an
+        // already-running server takes the SERVER's cwd unless `-c` says
+        // otherwise. Setting the child process's cwd — which the spawn already
+        // does — is not enough, so this must be on the argv.
+        for (cmd, args_in) in [("", &[][..]), ("python", &["train.py".to_string()][..])] {
+            let args = local_tmux_args("s", "/proj/sub", cmd, args_in);
+            let at = args.iter().position(|a| a == "-c").expect("-c must be passed");
+            assert_eq!(args[at + 1], "/proj/sub");
+            // Before the session name would be a different tmux option's value.
+            assert!(at > args.iter().position(|a| a == "-s").unwrap());
+        }
+    }
+
+    #[test]
+    fn no_directory_to_name_falls_back_rather_than_passing_an_empty_path() {
+        // tmux rejects `-c ""`, so a caller with nothing to say must produce the
+        // old argv rather than an argv that cannot start a session at all.
+        let args = local_tmux_args("s", "", "", &[]);
+        assert!(!args.iter().any(|a| a == "-c"));
+    }
+
+    #[test]
     fn command_tab_runs_command_then_keeps_a_shell() {
         // A command tab keeps a login shell AFTER the command so the finished run
         // reattaches (resumable-command-tab guarantee) instead of re-running.
-        let args = local_tmux_args("eldrun-x", "python", &["train.py".into()]);
+        let args = local_tmux_args("eldrun-x", "/proj", "python", &["train.py".into()]);
         assert_eq!(args[0], "new-session");
         assert!(args.iter().any(|a| a == "eldrun-x"));
-        let target = &args[5];
+        let target = args
+            .iter()
+            .find(|a| a.starts_with("'python'"))
+            .expect("the command line is on the argv");
         assert_eq!(target, "'python' 'train.py'; exec \"${SHELL:-/bin/bash}\" -l");
         // Options still trail.
         assert!(args.windows(2).any(|w| w == [";".to_string(), "set".to_string()]));
