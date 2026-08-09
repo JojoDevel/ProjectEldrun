@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useProjectsStore } from "../stores/projects";
+import { useSandboxBuildStore } from "../stores/sandboxBuild";
 import { runInstallInTab } from "./installCommand";
 
 /**
@@ -93,7 +94,24 @@ async function checkActiveProject(): Promise<void> {
     });
     if (shouldStartBuild(report, attempted)) {
       attempted.add(report.image);
-      runInstallInTab(`container image ${report.image}`, report.build_command!, "bash");
+      const tab = runInstallInTab(
+        `container image ${report.image}`,
+        report.build_command!,
+        "bash",
+      );
+      // Record it so the + menu can refuse to offer a tab that cannot start
+      // yet. Without this the build is invisible from inside the project — it
+      // runs in the ROOT scope — and the obvious next move is to open an agent,
+      // which fails with the very error the build exists to prevent.
+      useSandboxBuildStore.getState().start({
+        image: report.image,
+        projectId: activeId,
+        // The composed id the backend emits under, and the key `activity.ts`
+        // stores output against (`splitPtyId`'s format).
+        ptyId: `root:${tab.key}`,
+        tabKey: tab.key,
+        startedAt: Date.now(),
+      });
     }
   } catch {
     // Advisory, exactly as the toggle's own preflight is: a backend that does

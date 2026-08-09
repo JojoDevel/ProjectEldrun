@@ -1988,6 +1988,9 @@ const en = {
   "newTabMenu.searchPlaceholder": "Search…",
   "newTabMenu.noMatches": "No matches",
   "newTabMenu.groupAgents": "Agents",
+  "newTabMenu.containerBuilding": "Building the container image {image} — {elapsed}",
+  "newTabMenu.containerBuildingBlocked":
+    "Waiting for the container image {image} to finish building",
   "newTabMenu.groupLocalModel": "Local Model",
   "newTabMenu.groupLocalModelWithName": "Local Model · {model}",
   "newTabMenu.groupShell": "Shell",
@@ -6848,6 +6851,9 @@ const de: Dict = {
   "newTabMenu.searchPlaceholder": "Suchen…",
   "newTabMenu.noMatches": "Keine Treffer",
   "newTabMenu.groupAgents": "Agenten",
+  "newTabMenu.containerBuilding": "Container-Image {image} wird gebaut — {elapsed}",
+  "newTabMenu.containerBuildingBlocked":
+    "Warten, bis das Container-Image {image} fertig gebaut ist",
   "newTabMenu.groupLocalModel": "Lokales Modell",
   "newTabMenu.groupLocalModelWithName": "Lokales Modell · {model}",
   "newTabMenu.groupShell": "Shell",
@@ -11680,6 +11686,9 @@ const es: Dict = {
   "newTabMenu.searchPlaceholder": "Buscar…",
   "newTabMenu.noMatches": "Sin coincidencias",
   "newTabMenu.groupAgents": "Agentes",
+  "newTabMenu.containerBuilding": "Construyendo la imagen del contenedor {image} — {elapsed}",
+  "newTabMenu.containerBuildingBlocked":
+    "Esperando a que termine de construirse la imagen del contenedor {image}",
   "newTabMenu.groupLocalModel": "Modelo local",
   "newTabMenu.groupLocalModelWithName": "Modelo local · {model}",
   "newTabMenu.groupShell": "Shell",
@@ -16512,6 +16521,9 @@ const fr: Dict = {
   "newTabMenu.searchPlaceholder": "Rechercher…",
   "newTabMenu.noMatches": "Aucun résultat",
   "newTabMenu.groupAgents": "Agents",
+  "newTabMenu.containerBuilding": "Construction de l'image du conteneur {image} — {elapsed}",
+  "newTabMenu.containerBuildingBlocked":
+    "En attente de la fin de la construction de l'image du conteneur {image}",
   "newTabMenu.groupLocalModel": "Modèle local",
   "newTabMenu.groupLocalModelWithName": "Modèle local · {model}",
   "newTabMenu.groupShell": "Shell",
@@ -21344,6 +21356,9 @@ const it: Dict = {
   "newTabMenu.searchPlaceholder": "Cerca…",
   "newTabMenu.noMatches": "Nessun risultato",
   "newTabMenu.groupAgents": "Agenti",
+  "newTabMenu.containerBuilding": "Costruzione dell'immagine del container {image} — {elapsed}",
+  "newTabMenu.containerBuildingBlocked":
+    "In attesa che l'immagine del container {image} finisca di essere costruita",
   "newTabMenu.groupLocalModel": "Modello locale",
   "newTabMenu.groupLocalModelWithName": "Modello locale · {model}",
   "newTabMenu.groupShell": "Shell",

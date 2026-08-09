@@ -1,4 +1,4 @@
-import { useTabsStore } from "../stores/tabs";
+import { useTabsStore, type TabEntry } from "../stores/tabs";
 import { useProjectsStore } from "../stores/projects";
 import { IS_WINDOWS, IS_MAC } from "./platform";
 
@@ -66,13 +66,19 @@ export function installShellCommand(shellKind: InstallShellKind): string {
   return "";
 }
 
+/**
+ * Returns the tab it created, so a caller that needs to *follow* the install can
+ * do so — the container-image build watches its PTY for progress and gates the +
+ * menu on it (`stores/sandboxBuild`). Callers with nothing to follow ignore it,
+ * which is every other one.
+ */
 export function runInstallInTab(
   label: string,
   command: string,
   shellKind: InstallShellKind,
-): void {
+): TabEntry {
   const rootDir = useProjectsStore.getState().rootDir ?? "";
-  useTabsStore.getState().addTabToScope("root", {
+  const tab = useTabsStore.getState().addTabToScope("root", {
     label,
     cmd: installShellCommand(shellKind),
     cwd: rootDir, // empty resolves to ~/eldrun/root on the backend
@@ -82,4 +88,5 @@ export function runInstallInTab(
   useProjectsStore.setState({
     switchToast: `Installing ${label} — running in the root terminal`,
   });
+  return tab;
 }

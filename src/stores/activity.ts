@@ -115,6 +115,16 @@ export function lastPtyOutputAt(ptyId: string): number | undefined {
   return lastOutputByPty[ptyId];
 }
 
+/** The ANSI-stripped tail of a PTY's current output burst, or "" if none.
+ *  Read-only view for the container-image build's progress line
+ *  (`stores/sandboxBuild`) — the raw map stays module-private for the reason
+ *  above, and this is deliberately the *current burst* rather than a transcript:
+ *  a build writes continuously, so its burst is the recent output, and a
+ *  consumer that needs more than the last line should be reading the tab. */
+export function ptyOutputTail(ptyId: string): string {
+  return tailByPty[ptyId] ?? "";
+}
+
 /** Record that input was sent to a PTY on the user's behalf — a keystroke, a
  *  paste, or a user-triggered flow typing its command (`initialInput`). This is
  *  what makes output COUNT: "working" and "done" only ever arise from output

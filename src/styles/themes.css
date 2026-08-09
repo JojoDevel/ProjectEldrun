@@ -10487,6 +10487,22 @@ select option {
   font-style: italic;
 }
 
+/* The container image build's last output line, under the footer's sentence.
+   Monospace because it is docker's own words, not ours, and clipped to one line
+   with no wrap: a build step can be arbitrarily long and the menu must not
+   resize under the pointer while it runs. */
+.tab-new-menu-build-line {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* #py right-click-Run "arguments" popover on a file-tree row. A transparent
    full-window backdrop catches the outside click that closes it; the panel is
    pinned at the cursor (clamped on-screen by useClampToViewport). Canonical

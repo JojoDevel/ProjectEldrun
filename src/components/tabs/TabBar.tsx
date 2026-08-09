@@ -53,6 +53,7 @@ import { useSettingsStore } from "../../stores/settings";
 import { useExperimental } from "../../lib/experimental";
 import { closeTabWithConfirm } from "../../lib/closeRemoteTab";
 import { registerHostBoundTab } from "../../lib/hostBound";
+import { gateEntries, useSandboxBuildGate } from "./useSandboxBuildGate";
 import { listLocalDrivers, type LocalDriverInfo } from "../../lib/localDrivers";
 import { useActivityStore } from "../../stores/activity";
 import { UntestedTag } from "../common/UntestedTag";
@@ -141,6 +142,8 @@ export function TabBar({ groupId, projectCwd, showGroupClose, filesReserveWidth 
   // one project exists (it has nothing to show otherwise).
   const scope = useTabsStore((s) => s.scope);
   const hasProjects = useProjectsStore((s) => s.projects.length > 0);
+  // Grey the rows that need the container image while it is still building.
+  const buildGate = useSandboxBuildGate(scope);
   const showBlobItem = scope === "root" && hasProjects;
   const focusGroup = useTabsStore((s) => s.focusGroup);
   const setGroupActive = useTabsStore((s) => s.setGroupActive);
@@ -1397,10 +1400,11 @@ export function TabBar({ groupId, projectCwd, showGroupClose, filesReserveWidth 
           style={{ position: "fixed", left: menuPos.x, top: menuPos.y }}
         >
           <AddTabMenuList
+            footer={buildGate.footer}
             groups={[
               {
                 label: t("newTabMenu.groupAgents"),
-                entries: agentMenuEntries({
+                entries: gateEntries(agentMenuEntries({
                   installedBuiltins: enabledAgents,
                   installedCmds: installedCustom,
                   customAgents,
@@ -1410,7 +1414,7 @@ export function TabBar({ groupId, projectCwd, showGroupClose, filesReserveWidth 
                     setAgentDialogOpen(true);
                   },
                   t,
-                }),
+                }), buildGate.blockedReason("agent")),
               },
               // Only offer agents whose binary is actually installed: Mistral/vibe
               // (checked against `installedAgents`) and the drivers the backend
@@ -1457,12 +1461,17 @@ export function TabBar({ groupId, projectCwd, showGroupClose, filesReserveWidth 
               },
               {
                 label: t("newTabMenu.groupShell"),
-                entries: SHELL_ITEMS.filter((i) => i.kind === "shell").map((item) => ({
-                  key: item.cmd || "shell",
-                  label: itemLabel(item, t),
-                  color: TAB_ACCENT[item.kind],
-                  onPick: () => handleAdd(item),
-                })),
+                entries: gateEntries(
+                  SHELL_ITEMS.filter((i) => i.kind === "shell").map((item) => ({
+                    key: item.cmd || "shell",
+                    label: itemLabel(item, t),
+                    color: TAB_ACCENT[item.kind],
+                    onPick: () => handleAdd(item),
+                  })),
+                  // Under `scope: "agents"` a shell runs on the host and needs
+                  // no image, so this is undefined and the rows stay pickable.
+                  buildGate.blockedReason("shell"),
+                ),
               },
               {
                 label: t("newTabMenu.groupFiles"),
