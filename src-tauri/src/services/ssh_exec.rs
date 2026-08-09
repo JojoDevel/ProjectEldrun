@@ -1658,6 +1658,7 @@ mod tests {
             tmux_session: None,
             tmux_attach: None,
             host_bound_uid: None,
+            host_chosen_uid: None,
         }
     }
 

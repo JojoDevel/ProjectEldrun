@@ -12,6 +12,11 @@ export interface AddMenuEntry {
   /** Dot color (a TAB_ACCENT value or any CSS color). */
   color: string;
   disabled?: boolean;
+  /** Why this row is not pickable, as the disabled button's tooltip. A greyed
+   *  row with no reason is the thing this exists to prevent: it reads as a bug,
+   *  and the user's next move is to try the same thing again somewhere else.
+   *  Distinct from `caution`, which explains a risk in a row that IS pickable. */
+  disabledReason?: string;
   /** Render the shared `<UntestedTag />` after the label (and give the button the
    *  `untested` class, so label and tag lay out in a row). A menu entry cannot
    *  carry a ReactNode label — the search box filters on `label` as a string — so
@@ -52,7 +57,18 @@ export interface AddMenuGroup {
  * pointer fires enter events, which would drag the cursor back and make ↓
  * appear to stick.
  */
-export function AddTabMenuList({ groups }: { groups: AddMenuGroup[] }) {
+export function AddTabMenuList({
+  groups,
+  footer,
+}: {
+  groups: AddMenuGroup[];
+  /** Rendered below every group, outside the search filter — a standing fact
+   *  about the whole menu rather than a row in it (the container image being
+   *  built is the one case today). Deliberately not a group: it is not
+   *  pickable, it must not disappear when a query matches nothing, and the
+   *  keyboard cursor must not be able to land on it. */
+  footer?: React.ReactNode;
+}) {
   const t = useT();
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
@@ -162,6 +178,7 @@ export function AddTabMenuList({ groups }: { groups: AddMenuGroup[] }) {
                 e.untested ? " untested" : ""
               }`}
               disabled={e.disabled}
+              title={e.disabled ? e.disabledReason : undefined}
               onClick={e.onPick}
               // The pointer owns the same cursor the keys do. Guarded on an
               // actual change so a mouse resting on a row doesn't re-render
@@ -191,6 +208,7 @@ export function AddTabMenuList({ groups }: { groups: AddMenuGroup[] }) {
           )}
         </Fragment>
       ))}
+      {footer}
     </>
   );
 }

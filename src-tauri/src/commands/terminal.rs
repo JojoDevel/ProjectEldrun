@@ -599,3 +599,24 @@ pub async fn project_cpu_percent(
 pub fn register_host_bound_tab(project_id: String, uid: String) -> Result<(), String> {
     crate::services::sandbox::register_host_bound_tab(&project_id, &uid)
 }
+
+/// Set or clear the user's **own** per-tab exemption from the project container.
+///
+/// The two directions are one command rather than a register/unregister pair
+/// because the caller is one control with two positions, and splitting it would
+/// let a UI end up calling neither — which fails in the direction that leaves a
+/// tab on the host after the user put it back in the box.
+///
+/// This is a deliberate hole in a containment the user themselves switched on,
+/// so what it does NOT do matters: it grants nothing by itself (the spawn path
+/// re-reads the marker from the state dir), it is per tab and never per project,
+/// and it cannot widen the *project's* container settings, which live in a record
+/// the renderer cannot write.
+#[tauri::command]
+pub fn set_host_chosen_tab(project_id: String, uid: String, on: bool) -> Result<(), String> {
+    if on {
+        crate::services::sandbox::register_host_chosen_tab(&project_id, &uid)
+    } else {
+        crate::services::sandbox::unregister_host_chosen_tab(&project_id, &uid)
+    }
+}

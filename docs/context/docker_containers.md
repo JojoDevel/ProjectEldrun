@@ -18,6 +18,26 @@ becomes a one-click build tab. Flipping the toggle respawns every live tab —
 the pill confirms when a non-resumable agent conversation would be lost.
 Local projects only; hidden on Windows.
 
+**The build is offered on activation, not only on the toggle** (`lib/sandboxImage.ts`,
+installed once from `AppShell`). The one-click build used to be raised from the two
+places the container is switched *on* — the pill's toggle and the new/import dialog
+— which offers it for the project you just enabled and for no other. A project that
+arrives already-enabled therefore never saw it: an **import**, where the row defaults
+on because the code is unreviewed; a project restored from a previous session on a
+machine where the image was never built; a `projects.json` carried to a second
+machine; an image a `docker system prune` removed. In all four the first thing to
+notice was the tab spawn, which can only report an error — and the error's advice was
+to toggle a switch off and on to get back a button that should have been offered.
+Activation is the one event that always precedes opening a tab in a project, so the
+same preflight runs there. It is deduped by **image** rather than by project (one tag
+serves every project by default, so switching between three container projects must
+not start three builds of it) and attempted **once per session**, because a failed
+build that re-offered itself on every switch would bury its own error terminal; a
+second attempt is the toggle's, i.e. the user's. Nothing is built silently: it goes
+through `runInstallInTab` like every other install, in a visible **root-scope**
+terminal — root also being what stops it deadlocking, since a project-scope tab would
+be wrapped by the very container whose image is missing.
+
 **What it applies to is a second choice** (`SandboxSpec.scope`, the pill's
 "What runs in the container"), because the container's job is to keep *the
 agent* away from the rest of the machine and a project's other tabs are the
@@ -39,6 +59,40 @@ the container** for a `scope: All` project, using the *same* script the remote
 branch runs, so a venv whose base interpreter is missing is skipped rather than
 handed over as a dangling symlink; and `Agents` is the way to keep the host
 toolchain — venv, conda, pyenv — without turning the container off.
+
+**A single tab can be excused, by the user** (`lib/hostChosen.ts`, the tab
+context menu's "Run on my machine"). The scope answers *which kinds* of tab a
+project contains; it cannot say "agents contained, except this one" — and that
+is a real request: a UI test needs the host's display, a tool needs a service on
+the host, a debugger needs to attach to something outside. So a tab may hold its
+own exemption, minted at the click and recorded as a file under
+`<state_dir>/sessions/<project>/host_chosen/`.
+
+It is a **second directory beside `host_bound/`, not a second use of it**, and
+that separation is the design. The two grants answer different questions and
+only one is the user's: `host_bound` is a mechanical necessity (an Ollama driver
+tab cannot work inside the image at all, so Eldrun grants it silently — and
+narrows it with a fixed list of driver commands *because* nobody asked for it),
+while `host_chosen` is a decision. There is deliberately **no command list** on
+the second one: the point is that the user names the exception, and a list would
+refuse exactly the case the feature exists for — a plain shell — while appearing
+to work for agents. What keeps it honest is not a list but that it is asked for,
+one tab at a time, and legible afterwards: the two are audited by looking in two
+different directories, and `PtyOptions` carries two separate uids so the spawn
+site never has to ask which kind it is holding.
+
+Three rules follow. The marker is written **before** the tab is updated and the
+tab is cleared only **after** the backend confirms — the file is the authority,
+so the other order leaves a tab the backend still exempts (or one that claims
+the host and respawns into the container looking broken). The exemption is a
+**spawn dependency** in the shared `runsInContainer` rule, which is what makes
+flipping it actually move the process rather than merely relabel it. And an
+exempted tab **wears a badge**: a tab outside the container that looks identical
+to one inside it is the failure this feature would otherwise introduce, since
+the point of a sandbox is knowing what is in it. `duplicateSpec` drops the uid
+for the same reason it drops the host-bound one, plus one of its own — a copy
+looks like its original, and inheriting an exemption nobody asked it to have is
+precisely the silent widening the whole design avoids.
 
 Classification is by **the command that actually executes** (`is_agent_cmd`,
 reading `commands::agents::AGENTS` so the classifier and the + menu are one

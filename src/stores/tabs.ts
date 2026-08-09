@@ -72,6 +72,11 @@ function withRunHostDefault(
  *   against a specific uid; the caller re-registers one and passes it back in
  *   (a store action cannot await). Without it the copy simply runs inside the
  *   project's container, which is the safe direction (`lib/hostBound.ts`).
+ * - `hostChosenUid` is dropped for the same mechanical reason and one further
+ *   one: it records a decision the user made about *that* tab. A duplicate is a
+ *   new tab, and inheriting an exemption nobody asked for it to have — silently,
+ *   because a copy looks like its original — is the failure this whole feature
+ *   has to avoid. The copy starts contained; the user can choose again.
  */
 export function duplicateSpec(tab: TabEntry): Omit<TabEntry, "key"> {
   const {
@@ -80,6 +85,7 @@ export function duplicateSpec(tab: TabEntry): Omit<TabEntry, "key"> {
     tmuxSession: _tmux,
     tmuxAttach: _attach,
     hostBoundUid: _hostBound,
+    hostChosenUid: _hostChosen,
     ...rest
   } = tab;
   if (!sessionId) return rest;
@@ -590,6 +596,11 @@ export interface TabEntry {
   // grant itself is a file in the state dir; this is only the index into it, which
   // is why a planted value buys nothing.
   hostBoundUid?: string;
+  /** The user's OWN per-tab container exemption (`lib/hostChosen.ts`), as
+   *  opposed to `hostBoundUid`'s automatic one for local-model driver tabs.
+   *  Persisted for that field's reason: the grant is keyed by this uid and the
+   *  tab's key and PTY id are both re-minted by `loadFromLayout`. */
+  hostChosenUid?: string;
 }
 
 export type SplitDir = "row" | "column";
@@ -752,6 +763,11 @@ export interface SavedTabEntry {
   ephemeral?: boolean;
   // Persisted host-bound marker id (see TabEntry.hostBoundUid, #150).
   hostBoundUid?: string;
+  /** The user's OWN per-tab container exemption (`lib/hostChosen.ts`), as
+   *  opposed to `hostBoundUid`'s automatic one for local-model driver tabs.
+   *  Persisted for that field's reason: the grant is keyed by this uid and the
+   *  tab's key and PTY id are both re-minted by `loadFromLayout`. */
+  hostChosenUid?: string;
 }
 
 /** Serialized layout tree as persisted in project.json's `tab_groups`. */
@@ -932,6 +948,12 @@ interface TabsStore {
   // remote project). No-op when unchanged. The CenterPanel's localOnly/cwd
   // computation reads the result so the next mount spawns on the chosen side.
   setTabLocation: (key: string, location: TabLocation) => void;
+  // Set (or clear, with `undefined`) a tab's user-chosen container exemption
+  // (`lib/hostChosen.ts`). The uid is only an index — the grant is a marker file
+  // the backend owns — so this is called AFTER the backend confirms, never
+  // alongside it. The value is a spawn dependency, so writing it respawns the
+  // tab, which is what actually moves the process across the boundary.
+  setTabHostChosen: (key: string, uid: string | undefined) => void;
   // Set an agent tab's planner/doer mode. Rewrites the tab's launch args, which
   // respawns its PTY (TerminalView's spawn effect keys on the args) — the agent
   // comes back on the same conversation via the backend's resume rewrite. No-op
@@ -2294,6 +2316,23 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
       };
       if (s.scope === scope) patch.tabs = nextTabs;
       return patch;
+    });
+  },
+
+  setTabHostChosen: (key, uid) => {
+    set((s) => {
+      const { tabs, layout, focusedGroupId } = currentScopeState(s);
+      let changed = false;
+      const nextTabs = tabs.map((t) => {
+        if (t.key !== key || t.hostChosenUid === uid) return t;
+        changed = true;
+        const next = { ...t };
+        if (uid === undefined) delete next.hostChosenUid;
+        else next.hostChosenUid = uid;
+        return next;
+      });
+      if (!changed) return {};
+      return writeScope(s, s.scope, nextTabs, layout, focusedGroupId);
     });
   },
 
@@ -3911,6 +3950,7 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
         // grants nothing, and minting one on restore would be inventing an
         // authority the user never asked for.
         hostBoundUid: t.hostBoundUid,
+        hostChosenUid: t.hostChosenUid,
         // Restore the no-tmux marker BEFORE anything reads it: the minted name
         // above is harmless on such a tab precisely because `shouldPersistTab`
         // refuses to use it.
@@ -4099,6 +4139,7 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
         // The host-bound marker id (#150) — persisted so a restored local-model
         // tab still resolves to its registered marker in the state dir.
         hostBoundUid: t.hostBoundUid,
+        hostChosenUid: t.hostChosenUid,
         // Persist the no-tmux marker. Without it a restored SLURM log tab is an
         // ordinary shell tab again, gets a freshly minted session name, and leaves
         // the `tail -F` daemon on the login node the flag exists to prevent — and

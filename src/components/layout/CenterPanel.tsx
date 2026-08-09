@@ -56,6 +56,7 @@ import {
   type PhysPoint,
   type WindowFrame,
 } from "../../lib/coords";
+import { runsInContainer } from "../../lib/containerScope";
 import { dragPlatform } from "../../lib/dragPlatform";
 import { shouldPersistTab, shouldPersistLocalTab } from "../../lib/tmuxSession";
 import { IS_WINDOWS } from "../../lib/platform";
@@ -1099,13 +1100,16 @@ export function CenterPanel() {
           // shell from staying inside the container after the scope changes (the
           // flag is a spawn dep, so the change respawns exactly the affected tabs),
           // and avoid claiming a container the backend is about to take away.
-          const containerScope = paneProject?.sandbox?.scope ?? "all";
-          const sandbox =
-            (tab.kind === "agent" || tab.kind === "shell") &&
-            (containerScope === "all" || tab.kind === "agent") &&
-            scopeKey !== "root" &&
-            !!paneProject?.sandbox?.enabled &&
-            !paneProject?.remote;
+          const sandbox = runsInContainer({
+            kind: tab.kind,
+            scopeKey,
+            enabled: !!paneProject?.sandbox?.enabled,
+            scope: paneProject?.sandbox?.scope,
+            remote: !!paneProject?.remote,
+            // A spawn dependency, so toggling the exemption respawns exactly
+            // this tab — which is what actually moves it out of the container.
+            hostChosen: !!tab.hostChosenUid,
+          });
           // Persistent sessions (TODO #85): the stable, persisted session name to
           // wrap a shell/script tab in a tmux session, so a long run survives — for a
           // REMOTE tab an SSH drop / relaunch (default ON per project, opt out via

@@ -26,6 +26,7 @@ import { listLocalDrivers, type LocalDriverInfo } from "../../lib/localDrivers";
 import { useExperimental } from "../../lib/experimental";
 import { useT } from "../../lib/i18n";
 import { registerHostBoundTab } from "../../lib/hostBound";
+import { gateEntries, useSandboxBuildGate } from "./useSandboxBuildGate";
 
 interface Props {
   /** Scope (project id or "root") the new tab belongs to. Gates the project-only
@@ -76,6 +77,8 @@ export function NewTabMenu({ scope, projectCwd, projectName, anchor, onPick, onC
   // Built-in agents the user turned off in "Manage Agents" (Settings) despite
   // being installed — hidden from this menu without uninstalling the CLI.
   const disabledAgents = useSettingsStore((s) => s.settings?.disabled_agents);
+  // Grey the rows that need the container image while it is still building.
+  const buildGate = useSandboxBuildGate(scope);
 
   // Installed agent CLIs (id == cmd); only offer ones actually present. `null`
   // until the probe resolves, so the Agents list renders nothing (not a flash of
@@ -227,20 +230,24 @@ export function NewTabMenu({ scope, projectCwd, projectName, anchor, onPick, onC
       style={{ position: "fixed", left: pos.x, top: pos.y }}
     >
       <AddTabMenuList
+        footer={buildGate.footer}
         groups={[
           {
             label: t("newTabMenu.groupAgents"),
-            entries: agentMenuEntries({
-              installedBuiltins: enabledAgents,
-              installedCmds: installedCustom,
-              customAgents,
-              pick: pickStatic,
-              onAddCustom: () => {
-                onClose();
-                onManageAgents();
-              },
-              t,
-            }),
+            entries: gateEntries(
+              agentMenuEntries({
+                installedBuiltins: enabledAgents,
+                installedCmds: installedCustom,
+                customAgents,
+                pick: pickStatic,
+                onAddCustom: () => {
+                  onClose();
+                  onManageAgents();
+                },
+                t,
+              }),
+              buildGate.blockedReason("agent"),
+            ),
           },
           {
             label: localModel
@@ -282,12 +289,17 @@ export function NewTabMenu({ scope, projectCwd, projectName, anchor, onPick, onC
           },
           {
             label: t("newTabMenu.groupShell"),
-            entries: SHELL_ITEMS.filter((i) => i.kind === "shell").map((item) => ({
-              key: item.cmd || "shell",
-              label: itemLabel(item, t),
-              color: TAB_ACCENT[item.kind],
-              onPick: () => pickStatic(item),
-            })),
+            entries: gateEntries(
+              SHELL_ITEMS.filter((i) => i.kind === "shell").map((item) => ({
+                key: item.cmd || "shell",
+                label: itemLabel(item, t),
+                color: TAB_ACCENT[item.kind],
+                onPick: () => pickStatic(item),
+              })),
+              // Under `scope: "agents"` a shell runs on the host and needs no
+              // image, so this resolves to undefined and the rows stay pickable.
+              buildGate.blockedReason("shell"),
+            ),
           },
           {
             label: t("newTabMenu.groupFiles"),
