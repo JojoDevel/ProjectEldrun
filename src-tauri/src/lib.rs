@@ -1048,6 +1048,7 @@ pub fn run() {
             // Terminal
             commands::terminal::pty_spawn,
             commands::terminal::register_host_bound_tab,
+            commands::terminal::set_host_chosen_tab,
             commands::terminal::pty_write,
             commands::terminal::pty_resize,
             commands::terminal::pty_kill,

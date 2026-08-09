@@ -37,9 +37,22 @@ export interface ContainerScopeInput {
   scope?: SandboxScope;
   /** Remote projects have no local container to wrap. */
   remote?: boolean;
+  /** The user asked for THIS tab to run on the host (`lib/hostChosen.ts`). */
+  hostChosen?: boolean;
 }
 
 export function runsInContainer(opts: ContainerScopeInput): boolean {
+  // The user's own per-tab exemption, checked first because it is the one term
+  // that is about this tab rather than about the project. It only ever removes
+  // containment — the backend re-derives the same answer from a marker file the
+  // renderer cannot forge, so a `false` here is a narrowing and never a grant.
+  //
+  // It belongs in the shared rule rather than at each call site for the reason
+  // the rule is shared at all: the flag is a spawn dependency, so this is what
+  // respawns the tab when the exemption is toggled, and the + menu's build gate
+  // reads the same function — an exempted tab does not need the image, so its
+  // row must stay pickable while the image is still building.
+  if (opts.hostChosen) return false;
   // Absent scope is `all`, matching the backend's serde default: an older spec
   // written before the key existed must not lose containment on upgrade.
   const containerScope = opts.scope ?? "all";

@@ -86,6 +86,39 @@ describe("container scope", () => {
     );
   });
 
+  it("lets the user's own per-tab exemption out of the container", () => {
+    // The exemption is about THIS tab, so it beats every project-level term —
+    // including `scope: "all"`, which is the case it exists for (agents
+    // contained, except the one running a UI test against the real display).
+    for (const scope of ["all", "agents"] as const) {
+      expect(sandboxFor({ ...project, kind: "agent", scope, hostChosen: true })).toBe(false);
+      expect(sandboxFor({ ...project, kind: "shell", scope, hostChosen: true })).toBe(false);
+    }
+    // Absent/false is the ordinary path, unchanged.
+    expect(sandboxFor({ ...project, kind: "agent", scope: "all", hostChosen: false })).toBe(true);
+    expect(sandboxFor({ ...project, kind: "agent", scope: "all" })).toBe(true);
+  });
+
+  it("the exemption removes containment and can never add it", () => {
+    // Mirrors the backend test of the same shape. A tab the project would not
+    // contain anyway is not made containable by the flag being absent, and an
+    // exempted tab in a project with the toggle off is still just uncontained.
+    expect(sandboxFor({ ...project, kind: "agent", enabled: false, hostChosen: true })).toBe(false);
+    expect(sandboxFor({ ...project, kind: "agent", remote: true, hostChosen: true })).toBe(false);
+    expect(sandboxFor({ kind: "agent", scopeKey: "root", enabled: true, hostChosen: true })).toBe(
+      false,
+    );
+  });
+
+  it("flipping the exemption flips the flag, which is what respawns the tab", () => {
+    // Same reason the scope test above exists: the flag is a spawn dep, so if
+    // this did not change, toggling "run on my machine" would leave the process
+    // exactly where it was and the control would silently do nothing.
+    const before = sandboxFor({ ...project, kind: "agent", scope: "all" });
+    const after = sandboxFor({ ...project, kind: "agent", scope: "all", hostChosen: true });
+    expect(before).not.toBe(after);
+  });
+
   it("is the rule every renderer surface actually uses", () => {
     // This replaces a source-text tripwire that pinned CenterPanel's inlined
     // expression. There is no expression to pin any more: the rule moved to

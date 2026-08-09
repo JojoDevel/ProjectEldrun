@@ -344,6 +344,16 @@ pub struct PtyOptions {
     /// `ELDRUN_LOCAL_MODEL` env var, which is a usage-recap label.
     #[serde(default)]
     pub host_bound_uid: Option<String>,
+    /// The tab's **host-chosen marker id** — the user's own per-tab exemption
+    /// from the project's container, as opposed to `host_bound_uid`'s mechanical
+    /// one for local-model driver tabs.
+    ///
+    /// Same shape and the same rule: an *index* only, with the grant living in a
+    /// file under `<state_dir>/sessions/<project>/host_chosen/`. A separate field
+    /// from `host_bound_uid` so that which exemption a tab holds is legible at
+    /// the spawn site rather than inferred from which directory answered.
+    #[serde(default)]
+    pub host_chosen_uid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

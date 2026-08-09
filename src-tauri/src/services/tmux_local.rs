@@ -203,6 +203,7 @@ mod tests {
             tmux_session: None,
             tmux_attach: None,
             host_bound_uid: None,
+            host_chosen_uid: None,
         };
         wrap_pty_options_local(&mut opts);
         assert_eq!(opts.cmd, "bash");

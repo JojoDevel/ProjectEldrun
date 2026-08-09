@@ -60,6 +60,40 @@ branch runs, so a venv whose base interpreter is missing is skipped rather than
 handed over as a dangling symlink; and `Agents` is the way to keep the host
 toolchain — venv, conda, pyenv — without turning the container off.
 
+**A single tab can be excused, by the user** (`lib/hostChosen.ts`, the tab
+context menu's "Run on my machine"). The scope answers *which kinds* of tab a
+project contains; it cannot say "agents contained, except this one" — and that
+is a real request: a UI test needs the host's display, a tool needs a service on
+the host, a debugger needs to attach to something outside. So a tab may hold its
+own exemption, minted at the click and recorded as a file under
+`<state_dir>/sessions/<project>/host_chosen/`.
+
+It is a **second directory beside `host_bound/`, not a second use of it**, and
+that separation is the design. The two grants answer different questions and
+only one is the user's: `host_bound` is a mechanical necessity (an Ollama driver
+tab cannot work inside the image at all, so Eldrun grants it silently — and
+narrows it with a fixed list of driver commands *because* nobody asked for it),
+while `host_chosen` is a decision. There is deliberately **no command list** on
+the second one: the point is that the user names the exception, and a list would
+refuse exactly the case the feature exists for — a plain shell — while appearing
+to work for agents. What keeps it honest is not a list but that it is asked for,
+one tab at a time, and legible afterwards: the two are audited by looking in two
+different directories, and `PtyOptions` carries two separate uids so the spawn
+site never has to ask which kind it is holding.
+
+Three rules follow. The marker is written **before** the tab is updated and the
+tab is cleared only **after** the backend confirms — the file is the authority,
+so the other order leaves a tab the backend still exempts (or one that claims
+the host and respawns into the container looking broken). The exemption is a
+**spawn dependency** in the shared `runsInContainer` rule, which is what makes
+flipping it actually move the process rather than merely relabel it. And an
+exempted tab **wears a badge**: a tab outside the container that looks identical
+to one inside it is the failure this feature would otherwise introduce, since
+the point of a sandbox is knowing what is in it. `duplicateSpec` drops the uid
+for the same reason it drops the host-bound one, plus one of its own — a copy
+looks like its original, and inheriting an exemption nobody asked it to have is
+precisely the silent widening the whole design avoids.
+
 Classification is by **the command that actually executes** (`is_agent_cmd`,
 reading `commands::agents::AGENTS` so the classifier and the + menu are one
 list), not by a tab `kind` the renderer sends: `kind` is a label, `cmd` is the

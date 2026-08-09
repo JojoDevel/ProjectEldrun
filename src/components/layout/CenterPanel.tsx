@@ -1106,6 +1106,9 @@ export function CenterPanel() {
             enabled: !!paneProject?.sandbox?.enabled,
             scope: paneProject?.sandbox?.scope,
             remote: !!paneProject?.remote,
+            // A spawn dependency, so toggling the exemption respawns exactly
+            // this tab — which is what actually moves it out of the container.
+            hostChosen: !!tab.hostChosenUid,
           });
           // Persistent sessions (TODO #85): the stable, persisted session name to
           // wrap a shell/script tab in a tmux session, so a long run survives — for a

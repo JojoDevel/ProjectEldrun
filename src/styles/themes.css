@@ -10491,6 +10491,17 @@ select option {
    Monospace because it is docker's own words, not ours, and clipped to one line
    with no wrap: a build step can be arbitrarily long and the menu must not
    resize under the pointer while it runs. */
+/* The user's per-tab container exemption, on the tab itself. Warn-coloured
+   rather than accent: this is a deliberate hole in a containment the user
+   switched on, and it should read as a state worth noticing, not as decoration. */
+.tab-host-chosen {
+  margin-left: 4px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--warn, #d0a215);
+  flex-shrink: 0;
+}
+
 .tab-new-menu-build-line {
   margin-top: 2px;
   font-family: var(--font-mono);

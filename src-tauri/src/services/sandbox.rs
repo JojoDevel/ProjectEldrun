@@ -457,6 +457,91 @@ pub fn host_bound_marker_exists(project_id: &str, uid: &str) -> bool {
     valid_marker_uid(uid) && host_bound_dir(project_id).join(uid).is_file()
 }
 
+// ── The user's own per-tab exemption ──────────────────────────────────────
+
+/// Directory of **user-chosen** host markers:
+/// `<state_dir>/sessions/<project key>/host_chosen/`.
+///
+/// A second directory rather than a second use of `host_bound/`, and that
+/// separation is the design. The two grants answer different questions and only
+/// one of them is the user's:
+///
+/// - `host_bound` is a **mechanical necessity**. An Ollama driver tab cannot
+///   work inside the image at all — it needs the host's server and wiring — so
+///   Eldrun grants it silently, and the grant is narrowed by a fixed list of
+///   driver commands ([`HOST_BOUND_LOCAL_AGENT_CMDS`]) precisely because nobody
+///   asked for it.
+/// - `host_chosen` is a **decision**. The user has looked at a container they
+///   themselves switched on and said "not this tab" — for a UI test that needs
+///   the real display, a tool that must see the host's services, a debugger.
+///   There is no command list, because the point is that the user names the
+///   exception rather than Eldrun guessing at it.
+///
+/// Folding the second into the first would have been fewer lines and would have
+/// destroyed both: the mechanical exemption would silently widen to every
+/// command, and the user's choice would be indistinguishable afterwards from
+/// something Eldrun did on its own. They are audited by looking in two different
+/// directories, which is the property worth paying for.
+fn host_chosen_dir(project_id: &str) -> std::path::PathBuf {
+    crate::storage::project_session_dir(project_id).join("host_chosen")
+}
+
+/// Record that the user chose to run this tab on the host.
+///
+/// Same shape as [`register_host_bound_tab`] and for the same reason: the grant
+/// is a file in the state dir, which no container mounts, keyed by a
+/// frontend-minted uid the layout persists — so it survives a relaunch, and so
+/// no env var, tab label or spawn argument can stand in for it.
+///
+/// This does **not** defend against a compromised renderer, and nothing here
+/// could: registration is a command the renderer calls, so a renderer that can
+/// spawn can also register. That case is the CSP's, exactly as it is for the
+/// host-bound marker.
+pub fn register_host_chosen_tab(project_id: &str, uid: &str) -> Result<(), String> {
+    if !valid_marker_uid(uid) {
+        return Err("invalid host-chosen tab id".to_string());
+    }
+    let dir = host_chosen_dir(project_id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create host_chosen dir: {e}"))?;
+    std::fs::write(dir.join(uid), b"1").map_err(|e| format!("write host_chosen marker: {e}"))
+}
+
+/// Withdraw the choice — the toggle's other direction. Removing the file is what
+/// puts the tab back inside the container on its next spawn; a missing file is
+/// already the answer, so this is idempotent.
+pub fn unregister_host_chosen_tab(project_id: &str, uid: &str) -> Result<(), String> {
+    if !valid_marker_uid(uid) {
+        return Err("invalid host-chosen tab id".to_string());
+    }
+    let path = host_chosen_dir(project_id).join(uid);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("remove host_chosen marker: {e}")),
+    }
+}
+
+/// Whether the user has chosen the host for this (project, tab uid) pair.
+pub fn host_chosen_marker_exists(project_id: &str, uid: &str) -> bool {
+    valid_marker_uid(uid) && host_chosen_dir(project_id).join(uid).is_file()
+}
+
+/// Drop user-chosen markers for tabs the project no longer has. The twin of
+/// [`prune_host_bound_markers`], called from the same place with the same
+/// keep-set semantics.
+pub fn prune_host_chosen_markers(project_id: &str, keep: &std::collections::HashSet<String>) {
+    let dir = host_chosen_dir(project_id);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !keep.contains(&name) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Drop markers for tabs the project no longer has, so the directory does not
 /// grow one file per local-model tab ever opened. Called after a layout save with
 /// the uids the saved layout still carries.
@@ -553,6 +638,7 @@ pub fn resolve_spawn_authority(
     requested: SpawnAuthority,
     cmd: &str,
     host_bound_marker: bool,
+    host_chosen_marker: bool,
 ) -> SpawnAuthority {
     if !has_project {
         return requested;
@@ -567,6 +653,29 @@ pub fn resolve_spawn_authority(
         return SpawnAuthority {
             sandbox: false,
             local_only: true,
+        };
+    }
+    // The user's own exemption. Deliberately **not** gated on the command: the
+    // whole point is that the user names the exception, and a command list here
+    // would silently refuse the case the feature exists for (a plain shell that
+    // must see the host's display or services) while appearing to work for
+    // agents. What keeps it honest is not a list but that it is *asked for* —
+    // one marker per tab, written only when the user says so, visible on the tab
+    // afterwards, and audited by looking in `host_chosen/`.
+    //
+    // Ordered after the host-bound branch so a local-model tab keeps the
+    // `local_only: true` its wiring depends on. Ordered before the `Agents`
+    // narrowing because that branch answers a different question (which KINDS
+    // this project contains) and would otherwise leave a chosen agent tab
+    // contained under `scope: All`.
+    //
+    // `local_only` is left as the renderer asked, exactly as in the toggle-off
+    // case: this project is local (the remote branch returned above), so with no
+    // remote to wrap it changes nothing.
+    if host_chosen_marker {
+        return SpawnAuthority {
+            sandbox: false,
+            local_only: requested.local_only,
         };
     }
     // Agents-only: a shell, a script, a viewer Run/Debug tab runs on the host with
@@ -602,6 +711,15 @@ pub fn enforce_spawn_authority(opts: &mut PtyOptions) {
         .host_bound_uid
         .as_deref()
         .is_some_and(|uid| host_bound_marker_exists(&project_id, uid));
+    // Its own field, not a second reading of `host_bound_uid`. One uid with the
+    // grant decided by which directory holds the file would be fewer lines and
+    // would make every read of this code ask which kind it is looking at — in
+    // the one place where "which exemption is this tab holding" must be
+    // answerable without thinking.
+    let chosen = opts
+        .host_chosen_uid
+        .as_deref()
+        .is_some_and(|uid| host_chosen_marker_exists(&project_id, uid));
     let resolved = resolve_spawn_authority(
         true,
         is_remote,
@@ -613,6 +731,7 @@ pub fn enforce_spawn_authority(opts: &mut PtyOptions) {
         },
         &opts.cmd,
         marker,
+        chosen,
     );
     if resolved.sandbox != opts.sandbox || resolved.local_only != opts.local_only {
         eprintln!(
@@ -2198,6 +2317,7 @@ mod tests {
             tmux_session: None,
             tmux_attach: None,
             host_bound_uid: None,
+            host_chosen_uid: None,
         };
         wrap_pty_options_docker(&mut opts).unwrap();
         assert_eq!(opts.cmd, "claude");
@@ -2228,7 +2348,93 @@ mod tests {
             requested,
             cmd,
             marker,
+            // No user-chosen exemption: these tests are about the rule that
+            // applies when nobody has asked for an exception.
+            false,
         )
+    }
+
+    /// `resolve_spawn_authority` for a tab whose user asked for the host, under
+    /// a given scope — the exemption's own tests.
+    fn resolve_chosen(scope: SandboxScope, requested: SpawnAuthority, cmd: &str) -> SpawnAuthority {
+        resolve_spawn_authority(true, false, true, scope, requested, cmd, false, true)
+    }
+
+    #[test]
+    fn the_users_own_exemption_puts_any_command_on_the_host() {
+        // The point of the feature, and the one way it differs from the
+        // host-bound grant: NO command list. A shell is the case it exists for
+        // (a UI test that needs the real display), and a shell is exactly what a
+        // command list would have refused while appearing to work for agents.
+        assert_eq!(resolve_chosen(SandboxScope::All, want(true, false), "bash"), want(false, false));
+        assert_eq!(
+            resolve_chosen(SandboxScope::All, want(true, false), "claude"),
+            want(false, false),
+        );
+        // …and it survives `Agents`, where an agent tab would otherwise be the
+        // one kind still contained.
+        assert_eq!(
+            resolve_chosen(SandboxScope::Agents, want(true, false), "claude"),
+            want(false, false),
+        );
+    }
+
+    #[test]
+    fn the_users_exemption_is_a_marker_and_never_the_renderers_word() {
+        // Same tab, same command, same project — the ONLY difference is whether
+        // the state-dir marker is there. A renderer asking for `sandbox: false`
+        // without one is still contained (the S-2 escape, unchanged).
+        let asked_without_marker = resolve_all(true, false, true, want(false, true), "bash", false);
+        assert_eq!(asked_without_marker, want(true, false));
+        assert_eq!(resolve_chosen(SandboxScope::All, want(false, true), "bash"), want(false, true));
+    }
+
+    #[test]
+    fn the_users_exemption_cannot_grant_a_container_or_survive_the_toggle() {
+        // It only ever removes containment, so with the toggle OFF it changes
+        // nothing (there is none to remove), and it can never turn one ON.
+        let off = resolve_spawn_authority(
+            true,
+            false,
+            false,
+            SandboxScope::All,
+            want(true, false),
+            "bash",
+            false,
+            true,
+        );
+        assert!(!off.sandbox);
+        // A remote project has no local container either way.
+        let remote = resolve_spawn_authority(
+            true,
+            true,
+            true,
+            SandboxScope::All,
+            want(true, false),
+            "bash",
+            false,
+            true,
+        );
+        assert!(!remote.sandbox);
+    }
+
+    #[test]
+    fn a_host_bound_local_model_tab_keeps_its_own_shape_when_also_chosen() {
+        // Both markers on one tab is not a state the UI produces, but the
+        // ordering is load-bearing if it ever happens: the local-model branch
+        // wins, because that tab's wiring depends on `local_only: true` and the
+        // user's exemption leaves `local_only` as asked.
+        let both = resolve_spawn_authority(
+            true,
+            false,
+            true,
+            SandboxScope::All,
+            want(true, false),
+            "ollama",
+            true,
+            true,
+        );
+        assert_eq!(both, want(false, true));
     }
 
     #[test]
@@ -2311,6 +2517,7 @@ mod tests {
             want(false, false),
             cmd,
             false,
+            false,
         )
     }
 
@@ -2357,6 +2564,7 @@ mod tests {
                 SandboxScope::Agents,
                 want(true, false),
                 "claude",
+                false,
                 false
             ),
             want(false, false)
@@ -2370,6 +2578,7 @@ mod tests {
                 SandboxScope::Agents,
                 want(true, false),
                 "claude",
+                false,
                 false
             ),
             want(false, false)
@@ -2388,7 +2597,8 @@ mod tests {
                 SandboxScope::Agents,
                 want(false, true),
                 "vibe",
-                true
+                true,
+                false
             ),
             want(false, true)
         );
@@ -2409,6 +2619,7 @@ mod tests {
                 spec.scope,
                 want(false, true),
                 "bash",
+                false,
                 false
             ),
             want(true, false)

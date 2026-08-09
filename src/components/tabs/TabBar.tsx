@@ -54,6 +54,8 @@ import { useExperimental } from "../../lib/experimental";
 import { closeTabWithConfirm } from "../../lib/closeRemoteTab";
 import { registerHostBoundTab } from "../../lib/hostBound";
 import { gateEntries, useSandboxBuildGate } from "./useSandboxBuildGate";
+import { enableHostChosen, disableHostChosen } from "../../lib/hostChosen";
+import { runsInContainer } from "../../lib/containerScope";
 import { listLocalDrivers, type LocalDriverInfo } from "../../lib/localDrivers";
 import { useActivityStore } from "../../stores/activity";
 import { UntestedTag } from "../common/UntestedTag";
@@ -142,12 +144,16 @@ export function TabBar({ groupId, projectCwd, showGroupClose, filesReserveWidth 
   // one project exists (it has nothing to show otherwise).
   const scope = useTabsStore((s) => s.scope);
   const hasProjects = useProjectsStore((s) => s.projects.length > 0);
+  // This tab bar's own project (undefined at the root scope), for the container
+  // questions the context menu asks.
+  const scopeProject = useProjectsStore((st) => st.projects.find((p) => p.id === scope));
   // Grey the rows that need the container image while it is still building.
   const buildGate = useSandboxBuildGate(scope);
   const showBlobItem = scope === "root" && hasProjects;
   const focusGroup = useTabsStore((s) => s.focusGroup);
   const setGroupActive = useTabsStore((s) => s.setGroupActive);
   const renameTab = useTabsStore((s) => s.renameTab);
+  const setTabHostChosen = useTabsStore((s) => s.setTabHostChosen);
   const addTab = useTabsStore((s) => s.addTab);
   const duplicateTab = useTabsStore((s) => s.duplicateTab);
   const ensureTab = useTabsStore((s) => s.ensureTab);
@@ -706,6 +712,27 @@ export function TabBar({ groupId, projectCwd, showGroupClose, filesReserveWidth 
     duplicateTab(key, overrides);
   }
 
+  // Flip the user's own per-tab container exemption (`lib/hostChosen.ts`).
+  //
+  // The marker is written FIRST and the tab updated only once the backend has
+  // confirmed, never optimistically: the file is the authority, so a tab that
+  // said "on the host" while the marker write failed would respawn straight
+  // back into the container and look broken. The reverse order is the dangerous
+  // one and is why this awaits — clearing the uid locally while the marker
+  // survives would leave a tab the backend still exempts.
+  async function toggleHostChosen(key: string) {
+    setTabMenu(null);
+    const tab = tabs.find((tb) => tb.key === key);
+    if (!tab) return;
+    if (tab.hostChosenUid) {
+      const ok = await disableHostChosen(scope, tab.hostChosenUid);
+      if (ok) setTabHostChosen(key, undefined);
+      return;
+    }
+    const uid = await enableHostChosen(scope);
+    if (uid) setTabHostChosen(key, uid);
+  }
+
   // Right-click a tab → context menu; Shift+right-click → straight to rename.
   function onTabContextMenu(event: React.MouseEvent, key: string, index: number) {
     event.preventDefault();
@@ -1260,6 +1287,16 @@ export function TabBar({ groupId, projectCwd, showGroupClose, filesReserveWidth 
                 mirror, a clickable toggle when the file exists on both sides.
                 Shared with the detached strip (see TabLocalityBadges). */}
             <TabSourceBadge tabKey={tab.key} />
+            {/* The user's own container exemption, shown on the tab itself and
+                not only in the menu that set it. A tab running outside the
+                container while looking exactly like one running inside it is
+                the failure this whole feature would otherwise introduce — the
+                point of a sandbox is knowing what is in it. */}
+            {tab.hostChosenUid && (
+              <span className="tab-host-chosen" title={t("tabBar.runOnHostBadge")}>
+                ⇱
+              </span>
+            )}
             {/* Planner/doer badge (experimental, off by default) — click to switch
                 the agent between Plan and Auto. Only for agents that can actually
                 be launched into a mode AND resume on the respawn that costs (see
@@ -1622,6 +1659,37 @@ export function TabBar({ groupId, projectCwd, showGroupClose, filesReserveWidth 
             <span className="tab-new-menu-dot" style={{ color: "var(--accent)" }}>✎</span>
             {t("common.rename")}
           </button>
+          {(() => {
+            // Offered only where it means something: a tab this project would
+            // otherwise contain, or one already exempted (so the choice can be
+            // undone). A project with the container off, a remote project, and
+            // the root scope all render nothing rather than a control whose
+            // only outcome is a no-op.
+            const tab = tabs.find((tb) => tb.key === tabMenu.key);
+            if (!tab) return null;
+            const exempt = !!tab.hostChosenUid;
+            const contained = runsInContainer({
+              kind: tab.kind,
+              scopeKey: scope,
+              enabled: !!scopeProject?.sandbox?.enabled,
+              scope: scopeProject?.sandbox?.scope,
+              remote: !!scopeProject?.remote,
+            });
+            if (!exempt && !contained) return null;
+            return (
+              <button
+                className="tab-new-menu-item"
+                title={t("tabBar.runOnHostHint")}
+                onClick={() => void toggleHostChosen(tabMenu.key)}
+              >
+                <span className="tab-new-menu-dot" style={{ color: "var(--warn, #d0a215)" }}>
+                  {exempt ? "▣" : "▢"}
+                </span>
+                {exempt ? t("tabBar.runInContainer") : t("tabBar.runOnHost")}
+                <UntestedTag />
+              </button>
+            );
+          })()}
           {tabs.some((tab) => tab.key === tabMenu.key && canDuplicateTab(tab)) && (
             <button
               className="tab-new-menu-item"
