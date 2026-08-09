@@ -435,7 +435,9 @@ mod platform {
     //! configured `exec` is ignored (the OS tool is always used).
 
     use std::path::Path;
-    use std::process::{Command, Stdio};
+    // `Command` is not imported: this backend builds its child through
+    // `crate::paths::command_no_window`, like every other spawn in the app.
+    use std::process::Stdio;
 
     /// Spawn `screencapture -i <file>` (interactive region capture) writing into
     /// `dir`. `_exec` is unused on macOS.

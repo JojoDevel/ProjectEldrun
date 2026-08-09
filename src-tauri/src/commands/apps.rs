@@ -912,13 +912,19 @@ pub struct InstalledApp {
 /// enumerates Start-Menu shortcuts. Sorted by name.
 #[tauri::command]
 pub fn list_installed_apps() -> Vec<InstalledApp> {
+    // No `return` in either arm: cfg-stripping runs before the tail expression
+    // is worked out, so on each platform its own block is simply the last thing
+    // in the function — which is how the third arm below has always been
+    // written, and how `platform::detect_backend` writes its fallback. Spelled
+    // with `return` these were a `needless_return` on macOS and on Windows,
+    // neither of which the Linux-only lint job could see.
     #[cfg(target_os = "windows")]
     {
-        return windows_installed_apps();
+        windows_installed_apps()
     }
     #[cfg(target_os = "macos")]
     {
-        return macos_installed_apps();
+        macos_installed_apps()
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
@@ -970,7 +976,7 @@ fn windows_installed_apps() -> Vec<InstalledApp> {
             });
         }
     }
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps
 }
 
@@ -995,7 +1001,7 @@ fn macos_installed_apps_in(roots: &[PathBuf]) -> Vec<InstalledApp> {
     let mut seen = std::collections::HashSet::new();
     let mut apps: Vec<InstalledApp> = Vec::new();
     for root in roots {
-        let Ok(entries) = fs::read_dir(&root) else {
+        let Ok(entries) = fs::read_dir(root) else {
             continue;
         };
         for entry in entries.flatten() {
@@ -1012,7 +1018,7 @@ fn macos_installed_apps_in(roots: &[PathBuf]) -> Vec<InstalledApp> {
             apps.push(app);
         }
     }
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps
 }
 
@@ -1032,7 +1038,7 @@ fn parse_macos_app_bundle(app: &Path) -> Option<InstalledApp> {
     }
     let name = ["CFBundleDisplayName", "CFBundleName"]
         .iter()
-        .find_map(|key| dict.get(*key).and_then(plist::Value::as_string))
+        .find_map(|key| dict.get(key).and_then(plist::Value::as_string))
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(str::to_string)

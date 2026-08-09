@@ -108,6 +108,44 @@ jobs:
       - name: Lint backend
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+  # The backend half of `lint`, on macOS — and NOT redundant with it, which is
+  # the whole reason it exists. The comment above says a linter's verdict is not
+  # platform-dependent; that is true of the *rules* and false of the *code they
+  # see*. Everything behind `#[cfg(target_os = "macos")]` — the workspace
+  # backend, the libproc sampler, the netstat parser, the screenshot backend —
+  # is invisible to a Linux run, as is every Linux-only helper that becomes dead
+  # code elsewhere. When this job was first run against the tree it found 19
+  # errors that had accumulated unseen.
+  #
+  # Frontend linting stays Linux-only: `npm run lint` reads the same TypeScript
+  # on every OS, so that half genuinely would cost three times as much to learn
+  # the same thing.
+  #
+  # There is deliberately no Windows twin yet. The same blind spot exists there
+  # and the two lints its `#[cfg]` code carried are fixed, but nobody has run
+  # clippy on a Windows target to confirm the rest — and a job added red is a
+  # job that gets ignored. Adding it is the obvious follow-up.
+  lint-macos:
+    name: lint-macos
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Lint backend
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
   test:
     name: test
     runs-on: ubuntu-22.04

@@ -372,6 +372,17 @@ fn install_scrollbar_theme() {
 /// load-bearing; every call in here is best-effort (`let _ =`) so no failure can
 /// skip it.
 ///
+/// **It must be declared in `tauri.macos.conf.json` too, and that is not
+/// belt-and-braces.** Tauri merges a per-platform config with RFC 7386 JSON
+/// Merge Patch (`json_patch::merge`, `tauri-utils/src/config/parse.rs`), under
+/// which an *array* is replaced wholesale rather than merged element-wise — so
+/// the macOS `app.windows` entry IS the whole window config there, and any key
+/// it omits falls back to Tauri's own default, not to the base file's value.
+/// `visible` defaults to `true`, so leaving it out silently voided the whole
+/// invariant above on macOS: the window mapped at its declared size and then
+/// jumped to the restored geometry in front of the user. The same trap applies
+/// to every other key that file does not repeat.
+///
 /// Geometry rules (which monitor, what if it was unplugged) live in
 /// `services::window_state::resolve_startup_geometry`, which is pure and tested.
 fn restore_main_window(app: &tauri::App) {
@@ -573,7 +584,7 @@ pub fn run() {
                 if let Some(id) = _app
                     .get_webview_window("main")
                     .and_then(|w| w.ns_window().ok())
-                    .and_then(|ns| platform::macos::ns_window_id(ns as *mut std::ffi::c_void))
+                    .and_then(platform::macos::ns_window_id)
                 {
                     workspace.lock().unwrap().backend.set_main_window_id(id);
                 }

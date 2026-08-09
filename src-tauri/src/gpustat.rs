@@ -630,6 +630,10 @@ pub(crate) fn parse_nvidia_apps(stdout: &str) -> Vec<GpuProc> {
 /// One amdgpu `fdinfo` file's relevant fields. A process opens the card through
 /// many fds, but the fds of one rendering context share a `drm-client-id`, so the
 /// caller dedups on it to avoid counting the same memory once per fd.
+// `/proc/<pid>/fdinfo` is Linux, so `amd_fdinfo_procs` — the only caller of this
+// and the two functions below — is `#[cfg(target_os = "linux")]`; `test` keeps
+// their parser tests running everywhere.
+#[cfg(any(target_os = "linux", test))]
 #[derive(Default)]
 struct FdInfo {
     driver: String,
@@ -640,6 +644,7 @@ struct FdInfo {
 
 /// Parse a `/proc/<pid>/fdinfo/<fd>` file. Returns `None` for a non-DRM fd (a
 /// socket, a plain file) — one with no `drm-driver` line.
+#[cfg(any(target_os = "linux", test))]
 fn parse_fdinfo(text: &str) -> Option<FdInfo> {
     let mut info = FdInfo::default();
     for line in text.lines() {
@@ -660,6 +665,7 @@ fn parse_fdinfo(text: &str) -> Option<FdInfo> {
 }
 
 /// A `drm-memory-*` value, e.g. `"\t12345 KiB"`, as KiB.
+#[cfg(any(target_os = "linux", test))]
 fn parse_kib(v: &str) -> u64 {
     v.split_whitespace()
         .next()

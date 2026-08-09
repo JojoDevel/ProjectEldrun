@@ -3,7 +3,20 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$HOME/.local/share/eldrun"
+
+# shellcheck source=scripts/portable.sh
+. "$ROOT/scripts/portable.sh"
+
+# Log beside the app's own state, which is not the same path on every OS —
+# `storage::state_dir()` puts it under `~/Library/Application Support` on macOS
+# and `%APPDATA%` on Windows. Hardcoding the XDG path here left a mac session
+# writing its log to a directory nothing else in Eldrun uses, which is exactly
+# where nobody looks for it.
+if [ "$(uname -s)" = Darwin ]; then
+  LOG_DIR="$HOME/Library/Application Support/eldrun"
+else
+  LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/eldrun"
+fi
 LOG_FILE="$LOG_DIR/hotreload.log"
 LOG_MAX_BYTES=$((64 * 1024 * 1024))
 
@@ -11,14 +24,21 @@ mkdir -p "$LOG_DIR"
 
 # `tauri dev` streams every cargo build bar and vite HMR line in here, so the
 # log grows without bound (it reached 2 GB once). Keep one generation.
-if [ -f "$LOG_FILE" ] && [ "$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)" -gt "$LOG_MAX_BYTES" ]; then
+#
+# The size probe goes through `portable_file_size` because the `stat -c %s` this
+# used to call is GNU-only, and the `|| echo 0` fallback turned that into a
+# silent no-op on macOS: an erroring stat read as "0 bytes", i.e. "no rotation
+# needed", forever. Unknown is now empty rather than zero, and an unknown size
+# rotates nothing — but it also cannot masquerade as a measurement.
+log_size="$(portable_file_size "$LOG_FILE" || true)"
+if [ -f "$LOG_FILE" ] && [ -n "$log_size" ] && [ "$log_size" -gt "$LOG_MAX_BYTES" ]; then
   mv -f "$LOG_FILE" "$LOG_FILE.1"
 fi
 
 exec >>"$LOG_FILE" 2>&1
 
-printf '\n=== HOTRELOAD START %s ===\n' "$(date -Is)"
-trap 'status=$?; printf "=== HOTRELOAD EXIT %s status=%s ===\n" "$(date -Is)" "$status"' EXIT
+printf '\n=== HOTRELOAD START %s ===\n' "$(portable_iso_now)"
+trap 'status=$?; printf "=== HOTRELOAD EXIT %s status=%s ===\n" "$(portable_iso_now)" "$status"' EXIT
 
 cd "$ROOT"
 

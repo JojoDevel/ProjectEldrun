@@ -504,6 +504,9 @@ fn parse_who(content: &str, me: &str) -> Vec<LoginSession> {
 /// ARM/embedded boards `cpu_thermal`. Anything else (a GPU's `amdgpu`, a
 /// mainboard SuperIO chip, an NVMe drive) is deliberately excluded — a wrong
 /// sensor reported as "CPU" is worse than reporting none.
+// hwmon is Linux sysfs; the `platform` module that consults these is
+// `#[cfg(target_os = "linux")]`. `test` keeps the name-matrix tests on every OS.
+#[cfg(any(target_os = "linux", test))]
 fn is_cpu_hwmon(name: &str) -> bool {
     matches!(name.trim(), "coretemp" | "k10temp" | "zenpower" | "cpu_thermal")
 }
@@ -513,6 +516,7 @@ fn is_cpu_hwmon(name: &str) -> bool {
 /// SPD-hub temperature sensor). One hwmon appears per populated module that has
 /// one, so the reader takes the *hottest*. Anything else is excluded — a
 /// mainboard/SuperIO channel mislabelled as memory would be worse than none.
+#[cfg(any(target_os = "linux", test))]
 fn is_mem_hwmon(name: &str) -> bool {
     matches!(name.trim(), "jc42" | "spd5118")
 }
