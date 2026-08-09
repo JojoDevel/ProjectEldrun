@@ -21,9 +21,29 @@ DEV_PORT=1420
 bail() {
   printf 'REFUSING TO START: %s\n' "$1" >&2
   printf '  %s\n' "$2" >&2
-  notify-send -u critical -a Eldrun 'Eldrun is already running' "$1" 2>/dev/null || true
+  # Desktop notification, best-effort on both platforms. This script usually
+  # runs from a desktop entry with no terminal attached, so without it the
+  # refusal above is written to a log nobody is watching and the launch just
+  # appears to do nothing. `notify-send` is libnotify (Linux); macOS has no
+  # equivalent binary, so it goes through AppleScript. Both are guarded — a
+  # missing notifier must never turn a refusal into a failure to refuse.
+  if [ "$(uname -s)" = Darwin ]; then
+    osascript -e "display notification \"$1\" with title \"Eldrun is already running\"" \
+      >/dev/null 2>&1 || true
+  else
+    notify-send -u critical -a Eldrun 'Eldrun is already running' "$1" 2>/dev/null || true
+  fi
   exit 1
 }
+
+# How to free a TCP port, named for the platform the user is actually on:
+# `fuser` is psmisc and does not exist on macOS, so the advice printed there
+# was a command that cannot be run.
+if [ "$(uname -s)" = Darwin ]; then
+  PORT_KILL_HINT="lsof -ti tcp:$DEV_PORT | xargs kill"
+else
+  PORT_KILL_HINT="fuser -k $DEV_PORT/tcp"
+fi
 
 app_pids="$(pgrep -f "^$ROOT/target/debug/eldrun" || true)"
 dev_pids="$(pgrep -f "$ROOT/node_modules/.bin/tauri" || true)"
@@ -38,5 +58,5 @@ fi
 if (exec 3<>"/dev/tcp/127.0.0.1/$DEV_PORT") 2>/dev/null; then
   exec 3>&-
   bail "port $DEV_PORT is held by an orphaned dev server (no Eldrun process owns it)." \
-       "Clear it first: fuser -k $DEV_PORT/tcp"
+       "Clear it first: $PORT_KILL_HINT"
 fi

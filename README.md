@@ -37,8 +37,9 @@ about as much ceremony as running it locally*. See
 
 Built with **Tauri 2 + React + TypeScript**. Linux (X11 / KDE Wayland) and
 Windows both get native workspace, app-launch, default-app, and download
-integration today; macOS runs as a shell with a no-op workspace backend (on the
-roadmap).
+integration today; macOS has a native workspace backend as well, parking whole
+applications rather than individual windows (see
+[Platform support](#platform-support)).
 
 ---
 
@@ -81,13 +82,14 @@ AI/task metadata, and workflow state, so a project carries everything it needs t
 be resumed exactly where you left it, whether that is on this laptop or on a
 login node three networks away.
 
-The implementation runs natively on **Linux (X11 and KDE Wayland)** and
-**Windows** today — both with real per-project window parking — and the design is
-cross-platform by intent. The long-term shape is a stable Eldrun core behind
-pluggable compositor/window backends (X11, KDE/KWin, Hyprland, GNOME Shell, i3,
-Sway, and other Wayland environments; the Win32 backend on Windows), native macOS
-support, and eventually an Eldrun-native compositor for full control of projects,
-windows, and layout.
+The implementation runs natively on **Linux (X11 and KDE Wayland)**, **Windows**
+and **macOS** today — the first two with real per-project window parking, macOS
+with app-granularity parking, which is as far as the public APIs go — and the
+design is cross-platform by intent. The long-term shape is a stable Eldrun core
+behind pluggable compositor/window backends (X11, KDE/KWin, Hyprland, GNOME
+Shell, i3, Sway, and other Wayland environments; the Win32 backend on Windows;
+CoreGraphics on macOS), and eventually an Eldrun-native compositor for full
+control of projects, windows, and layout.
 
 See [VISION.md](docs/VISION.md) for the full strategy and platform rationale.
 
@@ -434,17 +436,29 @@ configuration.
 | **Linux — KDE Wayland**   | Yes                | Per-project virtual desktop model via KWin DBus scripting. KDE 5 and KDE 6 supported.        |
 | **Linux — other Wayland** | Partial            | Null backend (no workspace switching, no sticky windows). Terminal and file management work. |
 | **Windows**               | Yes                | Win32 `SW_HIDE`/`SW_SHOW` parking model (+ best-effort virtual-desktop pinning). Start-Menu app launch with `.lnk`/icon resolution, default-app mapping, downloads routing, external-window tracking, OpenVPN, SSH/SFTP remote projects, and Claude/Codex agent resume. |
-| **macOS**                 | Experimental shell | Null workspace backend (no per-project window parking). Browser downloads config and local Ollama detection work; app launching and file defaults fall back to the OS. |
+| **macOS**                 | Yes (alpha)        | Native workspace backend via `CGWindowList` + `NSRunningApplication` — no Accessibility permission, no private APIs. Parking is **app-granularity**, not per-window: hiding one window of another app needs private CGS/SkyLight calls, so a project switch hides whole applications (Eldrun, Finder, Dock and WindowServer are never hidden). Window embedding and `make_sticky` are not possible; the system-monitor process table sees only your own processes. App launch reads `.app` bundles, screenshots use `screencapture`, VPN goes through `osascript`. Universal Intel/Apple-Silicon `.dmg`, unsigned. |
 
 ### Platform and packaging
 
 - **Network indicator**: probes connectivity and shows online/offline plus wired
   or wireless state.
 - **Keyboard shortcuts**: Eldrun opens fullscreen by default; `F11` toggles
-  fullscreen; `Super` toggles all panels.
-- **Crash logging**: Rust panic hook appends to `~/.local/share/eldrun/crash.log`.
-- **Packaging**: Linux `.deb` and AppImage plus a Windows NSIS `.exe` installer,
-  built and published per `v*` tag by `.github/workflows/ci-cd.yml`.
+  fullscreen. The panel toggle is per-OS, because a lone modifier is not free
+  everywhere: `Super` on Linux, `F9` on Windows (the lone Win key opens Start on
+  release and cannot be suppressed), and on macOS there is no lone-key toggle at
+  all — ⌘ is the shortcut modifier for everything else — so panels are reached by
+  moving the cursor to the screen edge. Note that macOS binds `F11` to Show
+  Desktop by default, so the fullscreen key needs that system shortcut freed (or
+  ⌃⌘F, the standard macOS fullscreen chord) to do anything.
+- **Crash logging**: Rust panic hook appends to `crash.log` in the app's state
+  directory — `~/.local/share/eldrun/` on Linux,
+  `~/Library/Application Support/eldrun/` on macOS, `%APPDATA%\eldrun\` on
+  Windows.
+- **Packaging**: Linux `.deb` and AppImage, a Windows NSIS `.exe` installer, and
+  a universal (Intel + Apple Silicon) macOS `.dmg`, built and published per `v*`
+  tag by `.github/workflows/ci-cd.yml`. The macOS build is **unsigned and not
+  notarized**, so Gatekeeper blocks it until you either right-click → Open once
+  or run `xattr -dr com.apple.quarantine /Applications/Eldrun.app`.
 
 ## Current Limits
 
@@ -453,7 +467,12 @@ configuration.
   otherwise open in the OS default app (`xdg-open` / shell open) and are tracked
   as external windows.
 - KDE Wayland workspace management needs live-session QA.
-- macOS runs on the null workspace backend (no per-project window parking).
+- macOS parks whole **applications**, not individual windows, and cannot make
+  Eldrun sticky across Spaces — both need private CoreGraphics APIs. Its GPU
+  readout is also empty: the only non-Linux source is `nvidia-smi`, which no
+  Apple Silicon machine has. The backend and its tests run on macOS in CI, but
+  the FFI paths (window parking, libproc sampling, the `osascript` VPN flow)
+  have had no live-session QA yet.
 - Terminal/tab layout is persisted per project; shell, file-viewer, and
   resumable Claude/Codex agent tabs are restored on relaunch, but other agent
   tabs (Gemini, Vibe) and live PTY scrollback are not.

@@ -387,9 +387,17 @@ fn local_snapshot(_include_connections: bool) -> NetworkHostSnapshot {
 /// per bound address and carry no `<Link#…>` cell). The Address column is
 /// EMPTY for some link rows (`lo0`, `gif0`, …), so columns are indexed from
 /// the END of the row: … Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll — Ibytes
-/// is `len-5` and Obytes `len-2`. Loopback = name starts with "lo"; operstate
-/// isn't in this output, so `up` stays true (an interface present in the
-/// table is selectable — same convention as the remote /proc path).
+/// is `len-5` and Obytes `len-2`. Loopback = name starts with "lo".
+///
+/// **A trailing `*` on the name means the interface is DOWN.** That is the one
+/// piece of operstate this output does carry, and it is carried in the name
+/// cell rather than a column of its own — so it has to be stripped before the
+/// name is used for anything, and it is the only thing `up` can be derived
+/// from here. Reading it as part of the name got both halves wrong at once: a
+/// down interface was reported `up`, and it was reported under a name (`gif0*`)
+/// that matches nothing else in the system and reads as a rendering fault. A
+/// stock Apple Silicon Mac has three such rows (`ap1*`, `gif0*`, `stf0*`) out
+/// of ~24, so this is the common case, not an edge one.
 #[cfg(any(target_os = "macos", test))]
 fn parse_netstat_ibn(text: &str) -> Vec<NetworkInterface> {
     text.lines()
@@ -401,14 +409,15 @@ fn parse_netstat_ibn(text: &str) -> Vec<NetworkInterface> {
             if fields.len() < 8 {
                 return None;
             }
-            let name = *fields.first()?;
+            let raw_name = *fields.first()?;
+            let name = raw_name.strip_suffix('*').unwrap_or(raw_name);
             let rx_bytes = fields.get(fields.len() - 5)?.parse().ok()?;
             let tx_bytes = fields.get(fields.len() - 2)?.parse().ok()?;
             Some(NetworkInterface {
                 name: name.to_string(),
                 rx_bytes,
                 tx_bytes,
-                up: true,
+                up: !raw_name.ends_with('*'),
                 loopback: name.starts_with("lo"),
             })
         })
@@ -517,6 +526,12 @@ pub async fn network_host_snapshot(
     ))
 }
 
+// `ss` is Linux-only, so `linux_ssh_link` — the sole caller of this and of the
+// two helpers below — is `#[cfg(target_os = "linux")]`. Without a matching gate
+// they are dead code everywhere else, which the lint job never saw because it
+// only ever runs on Linux. `test` keeps their unit tests running on every OS,
+// the same shape `parse_netstat_ibn` uses in the other direction.
+#[cfg(any(target_os = "linux", test))]
 fn parse_master_pid(text: &str) -> Option<u32> {
     let start = text.find("pid=")?;
     text[start + 4..]
@@ -632,6 +647,7 @@ fn linux_ssh_link(_project_id: &str) -> SshLinkSnapshot {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn counter(text: &str, key: &str) -> Option<u64> {
     let start = text.find(key)?;
     text[start + key.len()..]
@@ -641,6 +657,7 @@ fn counter(text: &str, key: &str) -> Option<u64> {
         .ok()
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_ssh_link_ss(text: &str, master_pid: u32) -> Option<SshLinkSnapshot> {
     let needle = format!("pid={master_pid},");
     let lines: Vec<&str> = text.lines().collect();
@@ -753,6 +770,36 @@ utun0 1380  <Link#16>                            123     0      45678      321  
         // Garbage/empty input degrades to no interfaces, not a panic.
         assert!(parse_netstat_ibn("").is_empty());
         assert!(parse_netstat_ibn("Name Mtu\nen0 1500 broken").is_empty());
+    }
+
+    #[test]
+    fn netstat_ibn_reads_the_trailing_star_as_down() {
+        // Verbatim row shapes from a stock Apple Silicon Mac, where three of
+        // ~24 link rows carry the down marker. `*` rides on the name cell, so
+        // reporting it verbatim named an interface nothing else in the system
+        // calls `gif0*` AND left it looking up.
+        let input = "\
+Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll
+gif0*      1280  <Link#2>                             0     0          0        0     0          0     0
+stf0*      1280  <Link#3>                             0     0          0        0     0          0     0
+ap1*       1500  <Link#8>    9a:1f:2c:04:b7:60        0     0          0        0     0          0     0
+en0        1500  <Link#12>   a4:83:e7:00:11:22  1755892     0 1863340029  1084887     0  212930751     0
+";
+        let parsed = parse_netstat_ibn(input);
+        assert_eq!(parsed.len(), 4);
+        // The marker is stripped from the name — never rendered to the user.
+        assert_eq!(
+            parsed.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(),
+            ["gif0", "stf0", "ap1", "en0"],
+        );
+        // …and it is the only thing `up` is derived from in this output.
+        assert_eq!(
+            parsed.iter().map(|i| i.up).collect::<Vec<_>>(),
+            [false, false, false, true],
+        );
+        // A down row still reports its counters, and an up row is untouched.
+        assert_eq!(parsed[3].rx_bytes, 1_863_340_029);
+        assert_eq!(parsed[3].tx_bytes, 212_930_751);
     }
 
     #[test]

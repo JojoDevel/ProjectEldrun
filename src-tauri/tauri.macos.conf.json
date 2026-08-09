@@ -12,6 +12,7 @@
         "decorations": true,
         "transparent": false,
         "fullscreen": false,
+        "visible": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
       }

@@ -20,8 +20,8 @@ through. `src/` edits hot-reload into an already-open window, so usually
 nothing needs launching at all. Otherwise report results from the automated
 gates only, and say plainly that the change was not run live.
 
-The user launches via `./start-eldrun-tauri-hotreload.sh` (backgrounded; logs
-to `~/.local/share/eldrun/hotreload.log`) or `npm run tauri:dev`. Double-starts
+The user launches via `./start-eldrun-tauri-hotreload.sh` (backgrounded; logs to
+`hotreload.log` in the state dir below) or `npm run tauri:dev`. Double-starts
 are also blocked mechanically: `scripts/guard-single-instance.sh` runs from
 both the launcher and the `pretauri:dev` npm hook, so either path refuses when
 a session is live. It also refuses when port 1420 is held by an orphaned vite —
@@ -57,8 +57,11 @@ load-bearing files; the tree is the source of truth.
 
 - Managed projects: `~/eldrun/projects/<sanitized-name>/`; root terminal:
   `~/eldrun/root/`.
-- Global state in `~/.local/share/eldrun/`: `projects.json`, `settings.json`,
-  `default_apps.json`, `time_log.json`, `active_session.json`.
+- Global state in the per-OS state dir (`storage::state_dir()`) — `projects.json`,
+  `settings.json`, `default_apps.json`, `time_log.json`, `active_session.json`.
+  That is `~/.local/share/eldrun/` on Linux,
+  `~/Library/Application Support/eldrun/` on macOS, `%APPDATA%\eldrun\` on
+  Windows; paths written here as the Linux one are shorthand for all three.
 - New/imported projects get `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
   `.claude/settings.json`, `.gitignore`, `TODO.md`, `ROADMAP.md`, `STATUS.md`,
   `README.md` when missing.
@@ -108,6 +111,20 @@ you're touching; never read speculatively.
    version: `cargo +<ver> clippy --manifest-path src-tauri/Cargo.toml
    --all-targets -- -D warnings`. `cargo clippy --version` tells you what you
    actually ran.
+
+   **A green clippy on one OS does not mean a green clippy on the others**, for
+   a different reason: the rules are the same but the *code they can see* is
+   not. Everything behind a `#[cfg(target_os = …)]` is invisible to a run on any
+   other target, and a Linux-only helper becomes dead code the moment it is
+   compiled elsewhere. The Linux `lint` job had let 19 errors accumulate in the
+   macOS build before a `lint-macos` job was added beside it; Windows has no
+   equivalent job yet and is still unlinted.
+
+   **Minimum toolchain: Rust 1.93.** `rusqlite` pins `libsqlite3-sys`, whose
+   build script uses `cfg_select!`, stable only from 1.93 — so an older
+   toolchain does not merely lint differently, it fails to build the dependency
+   tree at all, with an `unstable library feature` error pointing into a crate
+   nobody edited.
 4. **Before every push** — this repo is public — the privacy/secret scan must
    pass. `.githooks/pre-push` now runs it over the commits being pushed and
    aborts on a hit, and a `privacy` CI job repeats it (a fresh clone has the
@@ -121,6 +138,13 @@ you're touching; never read speculatively.
    scan: `git config core.hooksPath .githooks`. See `.githooks/pre-push`,
    `scripts/bump-version.sh` (`minor|major` for a bigger bump), and
    `.github/workflows/ci-cd.yml`. Releases are manual: push a `v*` tag.
-   `npm run package` builds the same release artifact locally.
+   `npm run package` builds this platform's release artifact locally — an
+   AppImage (falling back to a raw binary without FUSE) plus desktop entries on
+   Linux, a `.dmg` on macOS. The macOS branch builds for the **host arch only**;
+   CI's `--target universal-apple-darwin` also needs
+   `rustup target add x86_64-apple-darwin` and compiles everything twice.
 
-Keys: `F11` fullscreen; `Super` toggles panels while Eldrun is focused.
+Keys: `F11` fullscreen (macOS binds it to Show Desktop by default, so it needs
+that system shortcut freed). Panels toggle on `Super` (Linux) / `F9` (Windows);
+macOS has no lone-key toggle — ⌘ belongs to the shortcut set — so panels come
+from the cursor-to-edge reveal there.

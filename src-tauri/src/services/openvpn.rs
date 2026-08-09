@@ -199,7 +199,14 @@ fn disconnect_interactive(config: &str) {
 /// elevated ask; anything *not* in here is still killed exactly as before, so no tunnel
 /// can be silently left up. Pids are unique for the app's lifetime in practice (the set
 /// only ever holds the handful of tunnels one run brought up).
-#[cfg(any(unix, target_os = "windows"))]
+// Narrowed from `any(unix, target_os = "windows")` — which is every target this
+// app builds for — to where the three are actually reached. Every caller
+// (`kill_root_pid`, `kill_root_pid_checked`, `kill_pidfile`) is
+// `#[cfg(target_os = "linux")]`, because this is the pkexec teardown path;
+// macOS tears its tunnels down through `osascript` and does not come here at
+// all. The old gate therefore compiled them into a macOS build with nothing to
+// call them. `test` keeps their unit tests running on every OS.
+#[cfg(any(target_os = "linux", test))]
 fn signalled_pids() -> &'static Mutex<std::collections::HashSet<i32>> {
     static PIDS: OnceLock<Mutex<std::collections::HashSet<i32>>> = OnceLock::new();
     PIDS.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
@@ -209,7 +216,7 @@ fn signalled_pids() -> &'static Mutex<std::collections::HashSet<i32>> {
 /// it before, or it is simply gone. Skipping reports *success* to the caller — the
 /// tunnel is down or on its way down either way, and the whole point is to not spend a
 /// password prompt re-confirming it.
-#[cfg(any(unix, target_os = "windows"))]
+#[cfg(any(target_os = "linux", test))]
 fn kill_already_handled(pid: i32) -> bool {
     if signalled_pids().lock().unwrap().contains(&pid) {
         return true;
@@ -218,7 +225,7 @@ fn kill_already_handled(pid: i32) -> bool {
 }
 
 /// Record that `pid` has been sent a TERM, so no later teardown pass re-elevates for it.
-#[cfg(any(unix, target_os = "windows"))]
+#[cfg(any(target_os = "linux", test))]
 fn mark_signalled(pid: i32) {
     signalled_pids().lock().unwrap().insert(pid);
 }

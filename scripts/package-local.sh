@@ -2,6 +2,43 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# macOS packages a .app/.dmg and installs nothing — there is no AppImage, no
+# `.desktop` entry and no `~/.local/share/applications` to write one into, so
+# everything below this branch is Linux-specific by construction. It used to run
+# there anyway: `npm run package` on a Mac built an AppImage that cannot be
+# produced, fell through to installing a raw Linux binary under
+# `~/.local/share/eldrun`, and wrote two desktop entries nothing would ever read.
+# CLAUDE.md's claim that `npm run package` "builds the same release artifact
+# locally" was true on exactly one platform.
+if [ "$(uname -s)" = Darwin ]; then
+  cd "$ROOT"
+  # Host architecture only. `--target universal-apple-darwin` is what CI ships,
+  # but it needs BOTH Apple targets installed (`rustup target add
+  # x86_64-apple-darwin`) and builds the whole dependency tree twice — a price
+  # worth paying for a release asset and not for a local check. The DMG this
+  # writes is the same bundle, minus the second slice.
+  npm run tauri:bundle:mac
+
+  dmg="$(find "$ROOT/target/release/bundle/dmg" -maxdepth 1 -name '*.dmg' -print -quit 2>/dev/null || true)"
+  app="$(find "$ROOT/target/release/bundle/macos" -maxdepth 1 -name '*.app' -print -quit 2>/dev/null || true)"
+
+  [ -n "$dmg" ] && echo "DMG: $dmg"
+  [ -n "$app" ] && echo "App bundle: $app"
+  if [ -z "$dmg" ] && [ -z "$app" ]; then
+    echo "package: the macOS build produced no bundle under target/release/bundle." >&2
+    exit 1
+  fi
+
+  # Unsigned, exactly like the alpha DMG the release workflow publishes, so it
+  # carries the same quarantine attribute and the same one-time incantation.
+  echo
+  echo "This bundle is UNSIGNED. Gatekeeper will refuse it until you either"
+  echo "right-click → Open once, or clear the quarantine flag:"
+  echo "  xattr -dr com.apple.quarantine '${app:-/Applications/Eldrun.app}'"
+  exit 0
+fi
+
 APP_DIR="$HOME/.local/share/eldrun"
 DESKTOP_DIR="$HOME/.local/share/applications"
 BINARY_DEST="$APP_DIR/eldrun"
