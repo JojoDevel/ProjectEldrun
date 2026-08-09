@@ -18,6 +18,26 @@ becomes a one-click build tab. Flipping the toggle respawns every live tab —
 the pill confirms when a non-resumable agent conversation would be lost.
 Local projects only; hidden on Windows.
 
+**The build is offered on activation, not only on the toggle** (`lib/sandboxImage.ts`,
+installed once from `AppShell`). The one-click build used to be raised from the two
+places the container is switched *on* — the pill's toggle and the new/import dialog
+— which offers it for the project you just enabled and for no other. A project that
+arrives already-enabled therefore never saw it: an **import**, where the row defaults
+on because the code is unreviewed; a project restored from a previous session on a
+machine where the image was never built; a `projects.json` carried to a second
+machine; an image a `docker system prune` removed. In all four the first thing to
+notice was the tab spawn, which can only report an error — and the error's advice was
+to toggle a switch off and on to get back a button that should have been offered.
+Activation is the one event that always precedes opening a tab in a project, so the
+same preflight runs there. It is deduped by **image** rather than by project (one tag
+serves every project by default, so switching between three container projects must
+not start three builds of it) and attempted **once per session**, because a failed
+build that re-offered itself on every switch would bury its own error terminal; a
+second attempt is the toggle's, i.e. the user's. Nothing is built silently: it goes
+through `runInstallInTab` like every other install, in a visible **root-scope**
+terminal — root also being what stops it deadlocking, since a project-scope tab would
+be wrapped by the very container whose image is missing.
+
 **What it applies to is a second choice** (`SandboxSpec.scope`, the pill's
 "What runs in the container"), because the container's job is to keep *the
 agent* away from the rest of the machine and a project's other tabs are the

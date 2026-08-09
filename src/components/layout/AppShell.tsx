@@ -67,6 +67,7 @@ import { autoConnectVpnOnLaunch } from "../../lib/vpnAutoConnect";
 import { initRemoteAutoReconnect } from "../../lib/remoteAutoReconnect";
 import { initExperimentalSweep } from "../../lib/experimentalSweep";
 import { initMachineSync } from "../../lib/machineSync";
+import { initSandboxImageWatch } from "../../lib/sandboxImage";
 import { listenEditorJump } from "../../stores/editorJump";
 import { listenSourceJump } from "../embed/FileViewerPane";
 import { BOX_SCOPE_PREFIX, useBoxesStore } from "../../stores/boxes";
@@ -374,6 +375,12 @@ export function AppShell() {
   useEffect(() => {
     initRemoteAutoReconnect();
     initMachineSync();
+    // Build a container-enabled project's image when it is missing. The
+    // one-click build used to be offered only when the toggle was flipped, so a
+    // project that arrived already-enabled (an import, a restored session, a
+    // pruned image) met the missing image as a spawn error instead. See
+    // lib/sandboxImage.
+    initSandboxImageWatch();
   }, []);
 
   // Withdraw the tabs (and live browser windows) of any experiment that is
