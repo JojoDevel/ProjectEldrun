@@ -254,6 +254,9 @@ pub fn watch_root_for(project_id: &str) -> Option<PathBuf> {
 /// `excluded` additionally drops the subtrees the user excluded by hand (the file
 /// tree's "Exclude from scans"), so one list governs every scan rather than the
 /// size walk and the churn watcher each having their own notion of "skip this".
+///
+/// **Linux only** — see [`attach_watch`] for why.
+#[cfg(target_os = "linux")]
 fn watch_pruned(
     watcher: &mut notify::RecommendedWatcher,
     root: &Path,
@@ -289,6 +292,102 @@ fn watch_pruned(
             stack.push((entry.path(), child_rel));
         }
     }
+}
+
+/// Attach `watcher` to `root`'s whole tree.
+///
+/// There are two implementations because "one watch per directory" is a **Linux
+/// economy and a macOS/Windows catastrophe**, and the difference is not a matter
+/// of degree:
+///
+/// - **Linux (inotify)** has no recursive mode at all. A watch is one watch
+///   descriptor per directory, taken from a per-user budget
+///   (`fs.inotify.max_user_watches`, commonly 8192), and `watch()` is a single
+///   cheap syscall. Descending ourselves is therefore both necessary and free,
+///   and [`watch_pruned`]'s pruning is what keeps a project with two virtualenvs
+///   from exhausting the budget for every other application on the machine.
+/// - **macOS (FSEvents)** and **Windows (`ReadDirectoryChangesW`)** are natively
+///   recursive, and one `watch()` call there is not one syscall. `notify`'s
+///   FSEvents backend implements each call as *stop the stream, join its runloop
+///   thread, rebuild an `FSEventStream` over every path accumulated so far,
+///   spawn a new thread, start it, and block until it acknowledges* — measured
+///   at **~25–48 ms per call** on an M4. So the per-directory walk that costs
+///   Linux nothing cost this project's 8530 surviving directories **3m31s**, on
+///   the main thread, on every launch.
+///
+/// The prune is a pure optimization whose sign flips per platform, so the
+/// platforms that do not need it do not pay it. Nothing about *which events are
+/// counted* changes: [`classify_fs_event`] already re-applies [`is_ignored`] to
+/// every path that arrives, and the user's own exclusion list is applied to the
+/// event stream by [`is_user_excluded`] rather than to the watch.
+///
+/// The honest cost of the recursive branch: events from `target/`, `node_modules`
+/// and the user's excluded folders are now *delivered* and discarded instead of
+/// never being sent. That is a path-component scan per event on the watcher's own
+/// thread — never the UI thread — against minutes of a frozen window.
+#[cfg(target_os = "linux")]
+fn attach_watch(
+    watcher: &mut notify::RecommendedWatcher,
+    root: &Path,
+    excluded: &std::collections::HashSet<String>,
+) {
+    watch_pruned(watcher, root, excluded);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn attach_watch(
+    watcher: &mut notify::RecommendedWatcher,
+    root: &Path,
+    _excluded: &std::collections::HashSet<String>,
+) {
+    // One stream for the tree. A failure here is the same non-event a failed
+    // per-directory watch is on Linux: the project simply records no file stats.
+    let _ = watcher.watch(root, RecursiveMode::Recursive);
+}
+
+/// Whether `path` lies inside one of the user's hand-excluded subtrees (the file
+/// tree's "Exclude from scans"), expressed the way `excluded` speaks: paths
+/// relative to the project root, `/`-separated.
+///
+/// This exists because the exclusion used to be enforced by *not watching* those
+/// directories, which only works where the watch is per-directory. Under a single
+/// recursive watch their events arrive like any other, so the same list has to be
+/// applied to the stream instead — otherwise churn in a folder the user
+/// explicitly excluded from scans would start inflating their recap.
+///
+/// Applied on every platform, deliberately. On Linux these events never arrive in
+/// the first place, so the check is dead weight there rather than a second,
+/// divergent notion of "skip this" — one rule, one place, and the two attach
+/// strategies cannot drift into counting different things.
+///
+/// Pure, so the rule is unit-testable without a watcher or a filesystem.
+pub fn is_user_excluded(
+    root: &Path,
+    path: &Path,
+    excluded: &std::collections::HashSet<String>,
+) -> bool {
+    if excluded.is_empty() {
+        return false;
+    }
+    let Ok(rel) = path.strip_prefix(root) else {
+        return false; // not under the watched root; not ours to exclude
+    };
+    // Test every ancestor, not just the full path: the list names folders, and an
+    // event is nearly always about a file somewhere below one.
+    let mut acc = String::new();
+    for component in rel.components() {
+        let Some(name) = component.as_os_str().to_str() else {
+            return false;
+        };
+        if !acc.is_empty() {
+            acc.push('/');
+        }
+        acc.push_str(name);
+        if excluded.contains(&acc) {
+            return true;
+        }
+    }
+    false
 }
 
 /// The user's own scan-exclusion list for `project_id` — `scan_excluded_paths` in
@@ -343,6 +442,12 @@ pub fn watch_project(state: &UsageWatchState, project_id: &str) -> Result<(), St
     let owner = project_id.to_string();
     let state_for_cb = state.clone();
     let mut debouncer = Debouncer::default();
+    // Read once, then shared by both consumers: the attach (which prunes with it
+    // on Linux) and the callback (which filters with it everywhere). Two reads
+    // could disagree if `project.json` were written in between.
+    let excluded = user_excluded_dirs(project_id);
+    let excluded_for_cb = excluded.clone();
+    let root_for_cb = canonical.clone();
 
     let mut watcher = recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(event) = res else { return };
@@ -351,6 +456,9 @@ pub fn watch_project(state: &UsageWatchState, project_id: &str) -> Result<(), St
             let Some(key) = classify_fs_event(&event.kind, path) else {
                 continue;
             };
+            if is_user_excluded(&root_for_cb, path, &excluded_for_cb) {
+                continue;
+            }
             if debouncer.should_count(path, key, now) {
                 state_for_cb.bump(&owner, key);
             }
@@ -359,7 +467,7 @@ pub fn watch_project(state: &UsageWatchState, project_id: &str) -> Result<(), St
     })
     .map_err(|e| e.to_string())?;
 
-    watch_pruned(&mut watcher, &canonical, &user_excluded_dirs(project_id));
+    attach_watch(&mut watcher, &canonical, &excluded);
 
     // Replacing the stored watcher drops the previous one, unwatching it.
     *guard = Some(Active {
@@ -615,5 +723,66 @@ mod tests {
 
         // A drained batch must not be re-counted on the next flush.
         assert!(state.drain().is_empty());
+    }
+
+    // ── is_user_excluded ───────────────────────────────────────────────────
+
+    fn excl(names: &[&str]) -> std::collections::HashSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The list names *folders*, but every event is about something inside one.
+    /// Matching only the full path would exclude the folder itself and count
+    /// every file in it — i.e. exclude nothing that matters.
+    #[test]
+    fn a_file_below_an_excluded_folder_is_excluded() {
+        let root = p("/home/u/proj");
+        let set = excl(&["data/raw"]);
+        assert!(is_user_excluded(&root, &p("/home/u/proj/data/raw"), &set));
+        assert!(is_user_excluded(
+            &root,
+            &p("/home/u/proj/data/raw/scan/img.tif"),
+            &set
+        ));
+        // A sibling, and the excluded folder's own parent, stay counted.
+        assert!(!is_user_excluded(&root, &p("/home/u/proj/data/clean/a.csv"), &set));
+        assert!(!is_user_excluded(&root, &p("/home/u/proj/data"), &set));
+    }
+
+    /// A prefix match on the *string* would exclude `data/rawdata` for a list
+    /// naming `data/raw`. Components are compared, so it does not.
+    #[test]
+    fn a_name_that_merely_starts_with_an_excluded_one_is_not_excluded() {
+        let root = p("/home/u/proj");
+        let set = excl(&["data/raw"]);
+        assert!(!is_user_excluded(
+            &root,
+            &p("/home/u/proj/data/rawdata/a.bin"),
+            &set
+        ));
+    }
+
+    /// Under a recursive watch an event can name a path outside the root (a
+    /// rename's other end). Excluding is about this project's list, so anything
+    /// the root does not contain is left to `classify_fs_event` to judge.
+    #[test]
+    fn a_path_outside_the_root_is_never_excluded_here() {
+        let root = p("/home/u/proj");
+        assert!(!is_user_excluded(
+            &root,
+            &p("/home/u/other/data/raw/x"),
+            &excl(&["data/raw"])
+        ));
+    }
+
+    /// The overwhelmingly common case is an empty list, and it must cost nothing
+    /// and exclude nothing — this now runs on every event on every platform.
+    #[test]
+    fn an_empty_exclusion_list_excludes_nothing() {
+        assert!(!is_user_excluded(
+            &p("/home/u/proj"),
+            &p("/home/u/proj/data/raw/x"),
+            &excl(&[])
+        ));
     }
 }
