@@ -64,12 +64,31 @@ pub async fn usage_summary(project_id: String) -> Result<UsageReport, String> {
 /// local mirror — is resolved backend-side (`services::usage_stats::watch_root_for`).
 /// Watching is best-effort: a project with nothing watchable simply records no
 /// file stats.
+/// **Async, and that is load-bearing.** A sync `#[tauri::command]` runs on the
+/// main thread — the UI thread — so every filesystem syscall it makes is a frozen
+/// window. Attaching the watch is not a cheap call: it descends the project tree
+/// and registers the whole thing, which on this project measured **3m31s** with
+/// the window unpainted and unresponsive for all of it (`services::usage_stats`'s
+/// `attach_watch` documents where that time went, and removes most of it).
+///
+/// Being off the UI thread is the half that must hold *whatever* the attach
+/// costs: a tree can always be bigger than the one that was measured, and this
+/// command is called on every project switch, not only at launch. Same fix, and
+/// the same reason, as `commands::tex::compile_tex`.
 #[tauri::command]
-pub fn usage_watch_project(
+pub async fn usage_watch_project(
     state: tauri::State<'_, crate::services::usage_stats::UsageWatchState>,
     project_id: String,
 ) -> Result<(), String> {
-    crate::services::usage_stats::watch_project(&state, &project_id)
+    // Cloned out of the `State` because the blocking closure outlives the borrow;
+    // `UsageWatchState` is a pair of `Arc`s, so the clone shares the one watcher
+    // and the one counter batch rather than duplicating either.
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        crate::services::usage_stats::watch_project(&state, &project_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Commits and line churn attributable to *you*, in a time window.
