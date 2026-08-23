@@ -50,6 +50,70 @@ if (!("ResizeObserver" in globalThis)) {
     ResizeObserverStub;
 }
 
+// Node ≥ 24 ships its OWN global `localStorage`, and it shadows jsdom's.
+//
+// This is not a missing API, which is the usual shape of everything else in this
+// file — it is a *worse* one winning. Node's Web Storage is enabled by default
+// from Node 24 and is backed by a file given by `--localstorage-file`; with no
+// valid path (nobody passes one here) the global degrades to a plain object with
+// `getItem`/`setItem` and **no `clear`**, so every `localStorage.clear()` in a
+// test throws `TypeError: localStorage.clear is not a function`, and values
+// written by one test leak into the next.
+//
+// It broke three CI jobs at once — `test`, `test-macos`, `test-windows` — which
+// is the signature of an environment change rather than a code one: CI pins
+// `node-version: lts/*`, `lts/*` rolled over to Node 24, and every platform
+// picked it up on the same push. Pinning the version would paper over it until
+// the next rollover; installing a real Storage fixes it for every Node, and for
+// anyone running the suite on Node Current locally.
+//
+// A minimal spec-faithful implementation rather than jsdom's own: by the time
+// this runs, jsdom's has already lost the global, and reaching back into jsdom
+// internals to retrieve it is a sharper dependency than the ~20 lines below.
+const storageIsUsable = (s: unknown): boolean =>
+  !!s && typeof (s as Storage).clear === "function";
+
+class MemoryStorage implements Storage {
+  private map = new Map<string, string>();
+  get length(): number {
+    return this.map.size;
+  }
+  key(index: number): string | null {
+    return Array.from(this.map.keys())[index] ?? null;
+  }
+  getItem(key: string): string | null {
+    const v = this.map.get(String(key));
+    return v === undefined ? null : v;
+  }
+  setItem(key: string, value: string): void {
+    this.map.set(String(key), String(value));
+  }
+  removeItem(key: string): void {
+    this.map.delete(String(key));
+  }
+  clear(): void {
+    this.map.clear();
+  }
+}
+
+for (const name of ["localStorage", "sessionStorage"] as const) {
+  if (storageIsUsable((globalThis as unknown as Record<string, unknown>)[name])) continue;
+  const store = new MemoryStorage();
+  // `defineProperty`, not assignment: Node's global is a non-writable own
+  // property, so `globalThis.localStorage = …` silently does nothing (and
+  // throws in strict mode). Both `globalThis` and `window` are set because a
+  // component may reach it either way, and in this environment they are not
+  // guaranteed to be the same object once Node has claimed the name.
+  for (const target of [globalThis, typeof window !== "undefined" ? window : undefined]) {
+    if (!target) continue;
+    Object.defineProperty(target, name, {
+      value: store,
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
 // jsdom does not implement the CSS interface, so `CSS.escape` (used when
 // building attribute selectors in drag/drop hit-testing) is undefined. Provide a
 // minimal, spec-faithful escape so those selectors resolve in tests.

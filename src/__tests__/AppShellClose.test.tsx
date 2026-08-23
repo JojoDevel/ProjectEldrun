@@ -47,9 +47,14 @@ vi.mock("../stores/projects", () => {
   return {
     // The close handler reads the store imperatively (getState) to flush the
     // active scope's tab layout, so the mock must carry it alongside the hook.
+    // `subscribe` is here for the same reason: AppShell installs watchers on
+    // mount that react to the active project changing (`lib/sandboxImage`'s
+    // missing-image build, alongside `initMachineSync`), and a zustand mock
+    // without it fails the render rather than the assertion. The unsubscribe it
+    // returns is a no-op — nothing in this file changes the store afterwards.
     useProjectsStore: Object.assign(
       vi.fn((sel: (s: object) => unknown) => sel(state)),
-      { getState: () => state },
+      { getState: () => state, subscribe: () => () => {} },
     ),
     // AppShell subscribes to runtime-switch events on mount; provide a no-op.
     listenProjectRuntimeSwitched: vi.fn().mockResolvedValue(() => {}),
