@@ -11,6 +11,7 @@ import { commitFileDrop, fileDropGoesToNewWindow } from "../tabs/commitFileDrop"
 import { startDetachedDropSession } from "../tabs/detachedDropTargets";
 import { FileDropContext } from "./fileDropContext";
 import { openFileEntry } from "./openFileEntry";
+import { revealInFileManager, revealMenuLabelKey } from "../../lib/fileManager";
 import { closeTabsForDeletedPath, retargetTabsForRenamedPath } from "./fileTabSync";
 import {
   startCursorPoll,
@@ -4075,6 +4076,36 @@ export function FileTree({
                     </button>
                   </>
                 )}
+                <hr />
+                {/* Hand the row back to the desktop, selected inside its folder.
+                    Local trees only: a remote (SFTP) listing's `entry.path` is a
+                    path on the SSH host, which the local file manager cannot
+                    point at — the same reason "Send to project…" is gated below.
+                    `treatLocal` (a remote project's mirror side) is a real
+                    filesystem path and keeps the item. */}
+                {!remoteListing && (
+                  <button
+                    onClick={() => {
+                      setContextMenu(null);
+                      void revealInFileManager(entry.path).catch((e) =>
+                        console.error("reveal_in_file_manager", e),
+                      );
+                    }}
+                  >
+                    {t(revealMenuLabelKey())}
+                  </button>
+                )}
+                {/* Offered on a remote listing too, unlike the reveal above: this
+                    copies text, and a host path is exactly what you paste into a
+                    terminal running on that host. */}
+                <button
+                  onClick={() => {
+                    setContextMenu(null);
+                    void navigator.clipboard?.writeText(entry.path).catch(() => {});
+                  }}
+                >
+                  {t("fileBrowser.copyPath")}
+                </button>
                 <hr />
                 <button onClick={() => copyEntries([entry], "copy")}>
                   {t("common.copy")}

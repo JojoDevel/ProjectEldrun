@@ -720,6 +720,7 @@ pub fn run() {
             commands::projects::projects_root_dir,
             commands::projects::remote_mirror_root_dir,
             commands::projects::open_in_file_manager,
+            commands::projects::reveal_in_file_manager,
             commands::projects::remote_mirror_status,
             commands::projects::set_remote_mirror_dir,
             commands::projects::move_remote_mirror,

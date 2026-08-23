@@ -22,6 +22,7 @@ import { useGitDirtyStore, gitDirtyState } from "../../stores/gitDirty";
 import { resolveLocalMirror, type ProjectEntry } from "../../types";
 import { fmtModified, type SortKey } from "../../lib/viewers/fileUtils";
 import { basename, dirname } from "../../lib/paths";
+import { openInFileManager } from "../../lib/fileManager";
 import { projectTypeTags } from "../projects/projectTypeTags";
 import { ProjectHoverCard, useProjectHoverCard } from "../projects/ProjectHoverCard";
 import { useRemoteMachinesStore } from "../../stores/remoteMachines";
@@ -927,7 +928,7 @@ export function ProjectFilesView({
     if (!projectDir) return;
     const sub = folder.replace(/^\/+|\/+$/g, "");
     const path = sub ? `${projectDir.replace(/\/+$/, "")}/${sub}` : projectDir;
-    invoke("open_in_file_manager", { path }).catch((e) => console.error("open_in_file_manager", e));
+    openInFileManager(path).catch((e) => console.error("open_in_file_manager", e));
   };
 
   // OS file drop → copy into the project, prompting on collisions. Confined to a

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Toggle } from "../common/Toggle";
-import { useWindowsStore } from "../../stores/windows";
 import { useProjectsStore } from "../../stores/projects";
 import { useSettingsStore } from "../../stores/settings";
 import { Dropdown } from "../common/Dropdown";
@@ -19,9 +18,10 @@ import {
   relFromAbs,
   visibleEntries,
 } from "../../lib/viewers/fileUtils";
-import { basename, dirname, isAbsolute } from "../../lib/paths";
+import { basename, isAbsolute } from "../../lib/paths";
 import { closeTabsForDeletedPath, retargetTabsForRenamedPath } from "./fileTabSync";
 import { openFileEntry } from "./openFileEntry";
+import { revealInFileManager, revealMenuLabelKey } from "../../lib/fileManager";
 import { useExperimental } from "../../lib/experimental";
 import { createDeckFile } from "../../lib/viewers/deck/create";
 import { UntestedTag } from "../common/UntestedTag";
@@ -55,7 +55,6 @@ interface Props {
 
 export function FileBrowser({ projectDir, projectId, active }: Props) {
   const t = useT();
-  const { openFile } = useWindowsStore();
   const projects = useProjectsStore((s) => s.projects);
   const viewerPrefs = useSettingsStore((s) => s.settings?.viewer_prefs);
   const disabledViewerSet = useMemo(() => disabledViewers(viewerPrefs), [viewerPrefs]);
@@ -323,13 +322,13 @@ export function FileBrowser({ projectDir, projectId, active }: Props) {
     navigator.clipboard?.writeText(paths.join("\n")).catch(() => {});
   }
 
+  // A real reveal: the entry ends up *selected* in its folder. This used to open
+  // the parent directory instead, which in a large folder left the user to find
+  // the file again by eye.
   function revealSelected() {
     const target = firstSelectedEntry();
     if (!target) return;
-    const path = target.is_dir ? target.path : dirname(target.path);
-    openFile(path, undefined, projectId, "middle_file_browser").catch((e) =>
-      setError(String(e)),
-    );
+    revealInFileManager(target.path).catch((e) => setError(String(e)));
   }
 
   function showProperties() {
@@ -426,7 +425,7 @@ export function FileBrowser({ projectDir, projectId, active }: Props) {
         <button onClick={renameSelected} disabled={!canMutate}>{t("fileBrowser.rename")}</button>
         <button onClick={deleteSelected} disabled={!canMutate}>{t("fileBrowser.delete")}</button>
         <button onClick={copySelectedPaths} disabled={!canMutate}>{t("fileBrowser.copyPath")}</button>
-        <button onClick={revealSelected} disabled={!canMutate}>{t("fileBrowser.reveal")}</button>
+        <button onClick={revealSelected} disabled={!canMutate}>{t(revealMenuLabelKey())}</button>
         <label><Toggle size="sm" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> {t("fileBrowser.hidden")}</label>
         <label><Toggle size="sm" checked={showStandardFiles} onChange={(e) => setShowStandardFiles(e.target.checked)} /> {t("fileBrowser.scaffold")}</label>
         <label><Toggle size="sm" checked={separateScaffold} onChange={(e) => setSeparateScaffold(e.target.checked)} /> {t("fileBrowser.separateScaffold")}</label>
@@ -531,7 +530,7 @@ export function FileBrowser({ projectDir, projectId, active }: Props) {
                 <>
                   <button onClick={() => runContextAction(() => firstSelectedEntry() && activate(firstSelectedEntry()!))}>{t("fileBrowser.open")}</button>
                   <button onClick={() => runContextAction(copySelectedPaths)}>{t("fileBrowser.copyPath")}</button>
-                  <button onClick={() => runContextAction(revealSelected)}>{t("fileBrowser.reveal")}</button>
+                  <button onClick={() => runContextAction(revealSelected)}>{t(revealMenuLabelKey())}</button>
                   <hr />
                   <button onClick={() => runContextAction(renameSelected)}>{t("fileBrowser.rename")}</button>
                   <button onClick={() => runContextAction(deleteSelected)}>{t("fileBrowser.delete")}</button>

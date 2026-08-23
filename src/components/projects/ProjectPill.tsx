@@ -19,6 +19,7 @@ import { useProjectsStore } from "../../stores/projects";
 import { useSettingsStore } from "../../stores/settings";
 import { cmdToKind, isResumableAgentTab, isRestorableTab, useTabsStore } from "../../stores/tabs";
 import { IS_WINDOWS } from "../../lib/platform";
+import { openInFileManager } from "../../lib/fileManager";
 import { runInstallInTab, PROVIDER_CLI_INSTALL, providerAuthLoginCmd } from "../../lib/installCommand";
 import { PythonInterpreterWindow } from "./PythonInterpreterWindow";
 import { useGitDirtyStore, type GitDirtyState } from "../../stores/gitDirty";
@@ -1462,7 +1463,7 @@ export function ProjectPill({
         }
       }
       if (!path) return;
-      await invoke("open_in_file_manager", { path });
+      await openInFileManager(path);
     } catch (e) {
       console.error("show on disk", e);
     }

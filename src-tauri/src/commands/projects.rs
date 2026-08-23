@@ -1954,6 +1954,30 @@ pub fn open_in_file_manager(path: String) -> Result<(), String> {
     opener::open(&dir).map_err(|e| e.to_string())
 }
 
+/// The pure half of `reveal_in_file_manager`. A path that no longer exists is
+/// refused here by name: every backend `reveal` degrades to *opening something*
+/// when its target is missing (the containing folder, or nothing at all), so a
+/// stale tree row would look like it worked while pointing at the wrong thing.
+pub fn revealable_path(path: &str) -> Result<PathBuf, String> {
+    let target = PathBuf::from(path);
+    if !target.exists() {
+        return Err(format!("No such path: {path}"));
+    }
+    Ok(target)
+}
+
+/// Reveal a file *or* folder in the OS file manager, selected inside its parent
+/// — `open -R` on macOS, `explorer /select,` on Windows, the FileManager1 (or
+/// portal) D-Bus call on Linux. The sibling of `open_in_file_manager`, which
+/// opens a directory *as* the browsed folder and therefore can never point at a
+/// file: that is why the file tree's right-click had no way to hand a file back
+/// to the desktop until this existed.
+#[tauri::command]
+pub fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let target = revealable_path(&path)?;
+    opener::reveal(&target).map_err(|e| e.to_string())
+}
+
 /// The local mirror status for a remote (SSH) project — backs the pill's "Show on
 /// disk". Returns the current mirror root (its stored override or the default),
 /// whether that directory still exists on disk (a user may have deleted it), and
@@ -3475,6 +3499,37 @@ fn chrono_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A reveal takes a file *or* a folder — unlike `open_in_file_manager`, whose
+    /// whole point is that it opens a directory as the browsed folder.
+    #[test]
+    fn a_reveal_accepts_a_file_as_readily_as_a_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("notes.md");
+        std::fs::write(&file, b"x").unwrap();
+
+        assert_eq!(
+            revealable_path(&file.to_string_lossy()).unwrap(),
+            file,
+            "a file is the case this exists for"
+        );
+        assert_eq!(
+            revealable_path(&tmp.path().to_string_lossy()).unwrap(),
+            tmp.path(),
+        );
+    }
+
+    /// Every backend's reveal degrades to opening *something* when the target is
+    /// gone, so a stale tree row must be refused here rather than silently
+    /// pointing the file manager somewhere else.
+    #[test]
+    fn a_reveal_refuses_a_path_that_is_gone_and_names_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("deleted.txt");
+
+        let err = revealable_path(&missing.to_string_lossy()).unwrap_err();
+        assert!(err.contains("deleted.txt"), "the message must name the path: {err}");
+    }
 
     /// #23 D3. `copy_dir_all` skipped `.git` only when `is_dir()`, so in a linked
     /// worktree the one-line `.git` FILE (`gitdir: <main>/.git/worktrees/<name>`)
