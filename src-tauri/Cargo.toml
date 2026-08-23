@@ -2,6 +2,14 @@
 name = "eldrun"
 version = "0.1.52"
 edition = "2021"
+# The real floor: rusqlite pins libsqlite3-sys, whose build script uses
+# `cfg_select!`, which 1.93 and 1.94 still reject as an unstable library feature
+# and 1.95 accepts. (CLAUDE.md said 1.93; `cargo +1.93.0 check` says otherwise.)
+# Declared here and not only in prose so *clippy* can see it, because an MSRV it
+# cannot see is one it assumes is the newest stable -- which is how
+# `chunks_exact_to_as_chunks` turned CI red three days after 1.98 shipped, over
+# code nobody had touched.
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 
 [lib]

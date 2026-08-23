@@ -1878,7 +1878,9 @@ pub struct SvcResponse {
 /// the caller reports an unrecognized reply rather than inventing a verdict.
 pub fn svc_parse_response(bytes: &[u8]) -> Option<SvcResponse> {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     let text = String::from_utf16_lossy(&units);
@@ -3048,7 +3050,9 @@ mod tests {
         let msg = svc_startup_message("C:\\wä", "--config a.ovpn", "");
         assert_eq!(msg.len() % 2, 0);
         let units: Vec<u16> = msg
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         // Exactly three NULs, one terminating each string (the last is empty).

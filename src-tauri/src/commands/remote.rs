@@ -274,8 +274,15 @@ pub async fn remote_connect(
 /// the Connect dialog both keep reporting "connected" from stale frontend
 /// state while every read that actually asks the pool (like the network-
 /// traffic pane) correctly reports disconnected.
+///
+/// Infallible, and the `Result` is structural: an async command borrowing
+/// `State` has to return one. The error type is `String` like every other
+/// command here rather than `()` — a unit error carries nothing a caller could
+/// report, which is exactly what clippy's `result_unit_err` objects to.
 #[tauri::command]
-pub async fn remote_connected_ids(pool: State<'_, RemotePoolState>) -> Result<Vec<String>, ()> {
+pub async fn remote_connected_ids(
+    pool: State<'_, RemotePoolState>,
+) -> Result<Vec<String>, String> {
     Ok(remote::connected_ids(pool.inner()).await)
 }
 
@@ -328,7 +335,7 @@ pub async fn remote_disconnect_all_hosts(
 #[tauri::command]
 pub async fn remote_connected_targets(
     pool: State<'_, RemotePoolState>,
-) -> Result<Vec<(String, String)>, ()> {
+) -> Result<Vec<(String, String)>, String> {
     Ok(remote::connected_targets(pool.inner()).await)
 }
 

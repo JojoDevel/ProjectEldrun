@@ -120,11 +120,17 @@ you're touching; never read speculatively.
    macOS build before a `lint-macos` job was added beside it; Windows has no
    equivalent job yet and is still unlinted.
 
-   **Minimum toolchain: Rust 1.93.** `rusqlite` pins `libsqlite3-sys`, whose
-   build script uses `cfg_select!`, stable only from 1.93 — so an older
-   toolchain does not merely lint differently, it fails to build the dependency
-   tree at all, with an `unstable library feature` error pointing into a crate
-   nobody edited.
+   **Minimum toolchain: Rust 1.95** — and it is `src-tauri/Cargo.toml`'s
+   `rust-version` that says so, not this paragraph. `rusqlite` pins
+   `libsqlite3-sys`, whose build script uses `cfg_select!`: 1.93 and 1.94 both
+   reject it as an unstable library feature, so an older toolchain does not
+   merely lint differently, it fails to build the dependency tree at all, with
+   an error pointing into a crate nobody edited. (This said 1.93 until
+   `cargo +1.93.0 check` was actually run.) Declaring it in the manifest is also
+   what stops the *newest* toolchain breaking the build: clippy reads
+   `rust-version` as the MSRV for its version-gated lints, and an MSRV it cannot
+   see it assumes to be current stable — which is how `chunks_exact_to_as_chunks`
+   turned CI red three days after 1.98 shipped, over code nobody had touched.
 4. **Before every push** — this repo is public — the privacy/secret scan must
    pass. `.githooks/pre-push` now runs it over the commits being pushed and
    aborts on a hit, and a `privacy` CI job repeats it (a fresh clone has the
